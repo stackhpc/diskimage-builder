@@ -6,7 +6,7 @@ fi
 set -eu
 set -o pipefail
 
-RET=$(/bin/select-boot-kernel-initrd)
+RET=$(/usr/local/bin/select-boot-kernel-initrd)
 KERNEL_VERSION=`echo ${RET%:*} | sed 's/vmlinuz-//g'`
 RAMDISK=/boot/${RET#*:}
 
