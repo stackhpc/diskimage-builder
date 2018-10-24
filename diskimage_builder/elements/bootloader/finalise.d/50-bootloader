@@ -231,6 +231,15 @@ function install_grub2 {
     if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
         sed -i 's%\(linux\|initrd\)16 /boot%\1efi /boot%g' $GRUB_CFG
     fi
+
+    # When using efi and the shim boot loader, the Grub configuration file
+    # needs to be stored on the EFI boot partition. We also restore BOOTX64.EFI
+    # as the shim.efi binary; it was replaced by GRUB2's core.efi binary
+    # earlier in the build process.
+    if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
+        /bin/cp $GRUB_CFG /boot/efi/EFI/centos/grub.cfg
+        /bin/cp /boot/efi/EFI/centos/shim.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
+    fi
 }
 
 DIB_EXTLINUX=${DIB_EXTLINUX:-0}
