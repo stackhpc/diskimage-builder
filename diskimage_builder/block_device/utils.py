@@ -12,7 +12,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import locale
+import logging
 import re
+import subprocess
+
+from diskimage_builder.block_device.exception import \
+    BlockDeviceSetupException
+
+logger = logging.getLogger(__name__)
 
 
 SIZE_UNIT_SPECS = [
@@ -34,7 +42,7 @@ SIZE_UNIT_SPECS = [
 
 # Basic RE to check and split floats (without exponent)
 # and a given unit specification (which must be non-numerical).
-size_unit_spec_re = re.compile("^([\d\.]*) ?([a-zA-Z0-9_]*)$")
+size_unit_spec_re = re.compile(r"^([\d\.]*) ?([a-zA-Z0-9_]*)$")
 
 
 def _split_size_unit_spec(size_unit_spec):
@@ -81,3 +89,57 @@ def parse_rel_size_spec(size_spec, abs_size):
         return True, int(abs_size * percent / 100.0)
 
     return False, parse_abs_size_spec(size_spec)
+
+
+def exec_sudo(cmd):
+    """Run a command under sudo
+
+    Run command under sudo, with debug trace of output.  This is like
+    subprocess.check_call() but sudo wrapped and with output tracing
+    at debug levels.
+
+    Arguments:
+
+    :param cmd: str command list; for Popen()
+    :return: the stdout+stderror of the called command
+    :raises BlockDeviceSetupException: if return code != 0.
+
+    Exception values similar to ``subprocess.CalledProcessError``
+
+    * ``returncode`` : returncode of child
+    * ``cmd`` : the command run
+    * ``output`` : stdout+stderr output
+    """
+    assert isinstance(cmd, list)
+    sudo_cmd = ["sudo"]
+    sudo_cmd.extend(cmd)
+    try:
+        logger.info("Calling [%s]", " ".join(sudo_cmd))
+    except TypeError:
+        # Popen actually doesn't care, but we've managed to get mixed
+        # str and bytes in argument lists which causes errors logging
+        # commands.  Give a clue as to what's going on.
+        logger.exception("Ensure all arguments are str type!")
+        raise
+
+    proc = subprocess.Popen(sudo_cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+
+    out = ""
+    with proc.stdout:
+        for line in iter(proc.stdout.readline, b''):
+            line = line.decode(encoding=locale.getpreferredencoding(False),
+                               errors='backslashreplace')
+            out += line
+            logger.debug("exec_sudo: %s", line.rstrip())
+    proc.wait()
+
+    if proc.returncode:
+        e = BlockDeviceSetupException("exec_sudo failed")
+        e.returncode = proc.returncode
+        e.cmd = ' '.join(sudo_cmd)
+        e.output = out
+        raise e
+
+    return out

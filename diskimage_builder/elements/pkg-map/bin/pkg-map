@@ -1,4 +1,4 @@
-#!/usr/local/bin/dib-python
+#!/usr/bin/env python3
 
 # Copyright 2014 Red Hat Inc.
 #
@@ -38,6 +38,12 @@ def os_family(distro):
     return family
 
 
+def os_major_release(release):
+    if release in ['8-stream']:
+        return '8'
+    return release
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Translate package name to distro specific name."
@@ -69,7 +75,7 @@ def main():
     args, extra = parser.parse_known_args()
 
     # Logs have traditionally gone to stderr with this tool.  Maintain
-    # compatability
+    # compatibility
     level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(stream=sys.stderr, level=level)
 
@@ -164,7 +170,8 @@ def main():
     if 'release' in package_names:
         try:
             # release is a sub-concept of distro
-            release_map = package_names['release'][args.distro][args.release]
+            release = os_major_release(args.release)
+            release_map = package_names['release'][args.distro][release]
             name_map.update(release_map)
         except KeyError:
             pass
@@ -189,6 +196,7 @@ def main():
                 sys.exit(1)
 
     sys.exit(0)
+
 
 if __name__ == '__main__':
     main()

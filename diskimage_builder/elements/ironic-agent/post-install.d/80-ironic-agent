@@ -6,7 +6,7 @@ fi
 set -eu
 set -o pipefail
 
-install-packages -e git cloud-init
+install-packages -e cloud-init
 
 rm -rf /tmp/ironic-python-agent
 
@@ -24,6 +24,7 @@ case "$DIB_INIT_SYSTEM" in
             systemctl disable iptables.service
         fi
         systemctl enable $(svc-map ironic-python-agent).service
+        systemctl enable ironic-agent-create-rescue-user.path
         ;;
     sysv)
         update-rc.d iptables disable

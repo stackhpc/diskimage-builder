@@ -6,7 +6,7 @@ set -o pipefail
 BASE_DIR=$(cd $(dirname "$0")/.. && pwd)
 
 # then execute tests for elements
-export DIB_CMD=disk-image-create
+export DIB_CMD="disk-image-create"
 export DIB_ELEMENTS=$(python -c '
 import diskimage_builder.paths
 diskimage_builder.paths.show_path("elements")')
@@ -22,17 +22,39 @@ export LC_ALL=
 #  tests are not run by "tox -e func" in the gate.
 #
 DEFAULT_SKIP_TESTS=(
-    # we run version pinned test in gate (this just runs latest)
-    fedora/build-succeeds
-    # in non-voting
+    ##  These are part of the "extras-nv" job
+    # These require "zypper" on the host which is not available on
+    # all platforms
+    opensuse-minimal/build-succeeds
+    opensuse-minimal/opensuse15-build-succeeds
+    # non-voting; not used by infra currently
     gentoo/build-succeeds
+    # Needs infra mirroring to move to voting job
+    debian-minimal/stable-build-succeeds
+    debian-minimal/stable-vm
+    ##
+
+    # These download base images which has shown to be very unreliable
+    # in the gate.  Keep them in a -nv job until we can figure out
+    # better caching for the images
     opensuse/build-succeeds
-    ubuntu-minimal/precise-build-succeeds
-    # good to have the test case around - but because of changes
-    # in testing does not work always.
-    debian-minimal/testing-build-succeeds
+    opensuse/opensuse15-build-succeeds
+    centos7/build-succeeds
+    debian/build-succeeds
+    fedora/build-succeeds
+    ubuntu/trusty-build-succeeds
+    ubuntu/xenial-build-succeeds
+    ubuntu/bionic-build-succeeds
+
     # No longer reasonable to test upstream (lacks a mirror in infra)
+    # Note this is centos6 and should probably be removed
     centos/build-succeeds
+
+    # This job is a bit unreliable, even if we get mirroring
+    debian-minimal/testing-build-succeeds
+
+    # Replaced by bionic
+    ubuntu-minimal/trusty-build-succeeds
 )
 
 # The default output formats (specified to disk-image-create's "-t"
@@ -45,9 +67,7 @@ function log_with_prefix {
 
     while read a; do
         log="[$pr] $a"
-        if [[ ${LOG_DATESTAMP} -ne 0 ]]; then
-            log="$(date +"%Y%m%d-%H%M%S.%N") ${log}"
-        fi
+        # note: dib logs have timestamp by default now
         echo "${log}"
     done
 }
@@ -86,7 +106,23 @@ function wait_minus_n {
     fi
 }
 
-# run_disk_element_test <test_element> <element> <use_tmp> <output_formats>
+# This takes the status and the "$logfile" argument passed to
+# disk-image-create and renames the file, so you can quickly see
+# in results which tests have failed.
+function logfile_status {
+    local status="$1"
+    local arg="$2"
+    local filename
+    if [[ -z "${arg// }" ]]; then
+        return
+    fi
+
+    filename="$(echo $arg | cut -f2 -d' ')"
+    echo "Moving ${filename} to ${filename/.log/.$status.log}"
+    mv "$filename" ${filename/.log/.$status.log}
+}
+
+# run_disk_element_test <test_element> <element> <use_tmp> <output_format> <logfile>
 #  Run a disk-image-build build of ELEMENT including any elements
 #  specified by TEST_ELEMENT.  Pass OUTPUT_FORMAT to "-t"
 function run_disk_element_test() {
@@ -94,11 +130,14 @@ function run_disk_element_test() {
     local element=$2
     local dont_use_tmp=$3
     local output_format="$4"
+    local logfile="$5"
 
     local use_tmp_flag=""
     local dest_dir=$(mktemp -d)
 
-    trap "rm -rf $dest_dir" EXIT
+    if [[ ${KEEP_OUTPUT} -ne 1 ]]; then
+        trap "rm -rf $dest_dir" EXIT
+    fi
 
     if [ "${dont_use_tmp}" = "yes" ]; then
         use_tmp_flag="--no-tmpfs"
@@ -110,6 +149,7 @@ function run_disk_element_test() {
         ELEMENTS_PATH=$DIB_ELEMENTS/$element/test-elements \
         $DIB_CMD -x -t ${output_format} \
                        ${use_tmp_flag} \
+                       ${logfile} \
                        -o $dest_dir/image -n $element $test_element 2>&1 \
            | log_with_prefix "${element}/${test_element}"; then
 
@@ -117,58 +157,86 @@ function run_disk_element_test() {
             if ! [ -f "$dest_dir/image.qcow2" ]; then
                 echo "Error: qcow2 build failed for element: $element, test-element: $test_element."
                 echo "No image $dest_dir/image.qcow2 found!"
+                logfile_status "FAIL" "${logfile}"
                 exit 1
             fi
         fi
 
-        # check inside the tar for sentinel files
-        if ! [ -f "$dest_dir/image.tar" ]; then
-            echo "Error: Build failed for element: $element, test-element: $test_element."
-            echo "No image $dest_dir/image.tar found!"
-            exit 1
-        else
-            if tar -tf $dest_dir/image.tar | grep -q /tmp/dib-test-should-fail; then
-                echo "Error: Element: $element, test-element $test_element should have failed, but passed."
+        if [[ "tar" =~ "$output_format" ]]; then
+            # check inside the tar for sentinel files
+            if ! [ -f "$dest_dir/image.tar" ]; then
+                echo "Error: Build failed for element: $element, test-element: $test_element."
+                echo "No image $dest_dir/image.tar found!"
+                logfile_status "FAIL" "${logfile}"
                 exit 1
             else
-                echo "PASS: Element $element, test-element: $test_element"
+                if tar -tf $dest_dir/image.tar | grep -q /tmp/dib-test-should-fail; then
+                    echo "Error: Element: $element, test-element $test_element should have failed, but passed."
+                    logfile_status "FAIL" "${logfile}"
+                    exit 1
+                fi
             fi
         fi
+
+        # if we got here, the test passed
+        echo "PASS: Element $element, test-element: $test_element"
+        logfile_status "PASS" "${logfile}"
     else
         if [ -f "${dest_dir}/dib-test-should-fail" ]; then
             echo "PASS: Element $element, test-element: $test_element"
+            logfile_status "PASS" "${logfile}"
         else
             echo "Error: Build failed for element: $element, test-element: $test_element."
+            logfile_status "FAIL" "${logfile}"
             exit 1
         fi
     fi
 
-    trap EXIT
-    rm -rf $dest_dir /tmp/dib-test-should-fail
+    rm -f /tmp/dib-test-should-fail
+
+    if [[ ${KEEP_OUTPUT} -ne 1 ]]; then
+        # reset trap and cleanup
+        trap EXIT
+        rm -rf $dest_dir
+    fi
 }
 
-# run_ramdisk_element_test <test_element> <element>
+# run_ramdisk_element_test <test_element> <element> <use_tmp> <output_formats>
 #  Run a disk-image-builder default build of ELEMENT including any
 #  elements specified by TEST_ELEMENT
 function run_ramdisk_element_test() {
     local test_element=$1
     local element=$2
+    local dont_use_tmp=$3
+    local output_format="$4" # ignored here
+    local logfile="$5"
     local dest_dir=$(mktemp -d)
 
+    local use_tmp_flag=""
+    if [ "${dont_use_tmp}" = "yes" ]; then
+        use_tmp_flag="--no-tmpfs"
+    fi
+
     if ELEMENTS_PATH=$DIB_ELEMENTS/$element/test-elements \
-        $DIB_CMD -x -o $dest_dir/image $element $test_element \
+        $DIB_CMD -x -o ${dest_dir}/image \
+                       ${logfile} \
+                       ${use_tmp_flag} \
+                       ${element} ${test_element} 2>&1 \
             | log_with_prefix "${element}/${test_element}"; then
         # TODO(dtantsur): test also kernel presence once we sort out its naming
         # problem (vmlinuz vs kernel)
         if ! [ -f "$dest_dir/image.initramfs" ]; then
             echo "Error: Build failed for element: $element, test-element: $test_element."
             echo "No image $dest_dir/image.initramfs found!"
+            logfile_status "FAIL" "${logfile}"
             exit 1
         else
             echo "PASS: Element $element, test-element: $test_element"
+            logfile_status "PASS" "${logfile}"
         fi
     else
         echo "Error: Build failed for element: $element, test-element: $test_element."
+        logfile_status "FAIL" "${logfile}"
         exit 1
     fi
 }
@@ -192,11 +260,13 @@ done
 #
 JOB_MAX_CNT=1
 LOG_DATESTAMP=0
+KEEP_OUTPUT=0
+LOG_DIRECTORY=''
 
 #
 # Parse args
 #
-while getopts ":hlj:t" opt; do
+while getopts ":hlj:tL:" opt; do
     case $opt in
         h)
             echo "run_functests.sh [-h] [-l] <test> <test> ..."
@@ -204,6 +274,8 @@ while getopts ":hlj:t" opt; do
             echo "  -l : list available tests"
             echo "  -j : parallel job count (default to 1)"
             echo "  -t : prefix log messages with timestamp"
+            echo "  -k : keep output directories"
+            echo "  -L : output logs into this directory"
             echo "  <test> : functional test to run"
             echo "           Special test 'all' will run all tests"
             exit 0
@@ -228,6 +300,12 @@ while getopts ":hlj:t" opt; do
             ;;
         t)
             LOG_DATESTAMP=1
+            ;;
+        k)
+            KEEP_OUTPUT=1
+            ;;
+        L)
+            LOG_DIRECTORY=${OPTARG}
             ;;
         \?)
             echo "Invalid option: -$OPTARG"
@@ -271,6 +349,11 @@ else
         fi
         TESTS_TO_RUN+=("${test}")
     done
+fi
+
+if [[ -n "${LOG_DIRECTORY}" ]]; then
+   mkdir -p "${LOG_DIRECTORY}"
+   export DIB_QUIET=1
 fi
 
 # print a little status info
@@ -333,8 +416,15 @@ for test in "${TESTS_TO_RUN[@]}"; do
         element_output=$(cat ${element_output_override})
     fi
 
+    log_argument=' '
+    if [[ -n "${LOG_DIRECTORY}" ]]; then
+        log_argument="--logfile ${LOG_DIRECTORY}/${element}_${test_element}.log"
+    fi
+
     echo "Running $test ($element_type)"
-    run_${element_type}_element_test $test_element $element ${DONT_USE_TMP} "${element_output}" &
+    run_${element_type}_element_test \
+        $test_element $element \
+        ${DONT_USE_TMP} "${element_output}" "$log_argument" &
 done
 
 # Wait for the rest of the jobs

@@ -13,19 +13,104 @@
 # under the License.
 
 import codecs
-from diskimage_builder.block_device.blockdevicesetupexception \
-    import BlockDeviceSetupException
-from diskimage_builder.graph.digraph import Digraph
+import collections
 import json
 import logging
 import os
+import pickle
+import pprint
 import shutil
-from stevedore import extension
-import sys
 import yaml
+
+from diskimage_builder.block_device.config import config_tree_to_graph
+from diskimage_builder.block_device.config import create_graph
+from diskimage_builder.block_device.exception import \
+    BlockDeviceSetupException
+from diskimage_builder.block_device.utils import exec_sudo
 
 
 logger = logging.getLogger(__name__)
+
+
+def _load_json(file_name):
+    """Load file from .json file on disk, return None if not existing"""
+    if os.path.exists(file_name):
+        with codecs.open(file_name, encoding="utf-8", mode="r") as fd:
+            return json.load(fd)
+    return None
+
+
+class BlockDeviceState(collections.MutableMapping):
+    """The global state singleton
+
+    An reference to an instance of this object is saved into nodes as
+    a global repository.  It wraps a single dictionary "state" and
+    provides a few helper functions.
+
+    The state ends up used in two contexts:
+
+     - The node list (including this state) is pickled and dumped
+       between cmd_create() and later cmd_* calls that need to call
+       the nodes.
+
+     - Some other cmd_* calls, such as cmd_writefstab, only need
+       access to values inside the state and not the whole node list,
+       and load it from the json dump created after cmd_create()
+    """
+    # XXX:
+    #  - we could implement getters/setters such that if loaded from
+    #    disk, the state is read-only? or make it append-only
+    #    (i.e. you can't overwrite existing keys)
+    def __init__(self, filename=None):
+        """Initialise state
+
+        :param filename: if :param:`filename` is passed and exists, it
+          will be loaded as the state.  If it does not exist an
+          exception is raised.  If :param:`filename` is not
+          passed, state will be initalised to a blank dictionary.
+        """
+        if filename:
+            if not os.path.exists(filename):
+                raise BlockDeviceSetupException("State dump not found")
+            else:
+                self.state = _load_json(filename)
+                assert self.state is not None
+        else:
+            self.state = {}
+
+    def __delitem__(self, key):
+        del self.state[key]
+
+    def __getitem__(self, key):
+        return self.state[key]
+
+    def __setitem__(self, key, value):
+        self.state[key] = value
+
+    def __iter__(self):
+        return iter(self.state)
+
+    def __len__(self):
+        return len(self.state)
+
+    def save_state(self, filename):
+        """Persist the state to disk
+
+        :param filename: The file to persist state to
+        """
+        logger.debug("Writing state to: %s", filename)
+        self.debug_dump()
+        with open(filename, "w") as fd:
+            json.dump(self.state, fd)
+
+    def debug_dump(self):
+        """Log state to debug"""
+        # This is pretty good for human consumption, but maybe a bit
+        # verbose.
+        nice_output = pprint.pformat(self.state, width=40)
+        for line in nice_output.split('\n'):
+            logger.debug('{0:{fill}{align}50}'.format(
+                line, fill=' ', align='<'))
 
 
 class BlockDevice(object):
@@ -36,7 +121,7 @@ class BlockDevice(object):
 
     A typical call sequence:
 
-    cmd_init: initialized the block device level config.  After this
+    cmd_init: initialize the block device level config.  After this
        call it is possible to e.g. query information from the (partially
        automatic generated) internal state like root-label.
 
@@ -50,6 +135,8 @@ class BlockDevice(object):
        the correct position.
        After this call it is possible to copy / install all the needed
        files into the appropriate directories.
+
+    cmd_writefstab: creates the (complete) fstab for the system.
 
     cmd_umount: unmount and detaches all directories and used many
        resources. After this call the used (e.g.) images are still
@@ -70,29 +157,36 @@ class BlockDevice(object):
 
     In a script this should be called in the following way:
 
-    dib-block-device --phase=init ...
+    dib-block-device init ...
     # From that point the database can be queried, like
-    ROOT_LABEL=$(dib-block-device --phase=getval --symbol=root-label ...)
+    ROOT_LABEL=$(dib-block-device getval root-label)
 
     Please note that currently the dib-block-device executable can
     only be used outside the chroot.
 
-    dib-block-device --phase=create ...
-    trap "dib-block-device --phase=delete ..." EXIT
+    dib-block-device create ...
+    trap "dib-block-device delete ..." EXIT
     # copy / install files
-    dib-block-device --phase=umount ...
+    dib-block-device umount ...
     # convert image(s)
-    dib-block-device --phase=cleanup ...
+    dib-block-device cleanup ...
     trap - EXIT
     """
 
-    def _merge_into_config(self):
-        """Merge old (default) config into new
+    def _merge_rootfs_params(self):
+        """Merge rootfs related parameters into configuration
 
-        There is the need to be compatible using some old environment
-        variables.  This is done in the way, that if there is no
-        explicit value given, these values are inserted into the current
-        configuration.
+        To maintain compatability with some old block-device
+        environment variables from before we had a specific
+        block-device config, disk-image-create provides a "parameters"
+        file that translates the old bash-environment variables into a
+        YAML based configuration file (``self.params``).
+
+        Here we merge the values in this parameters file that relate
+        to the root file-system into the final configuration.  We look
+        for the ``mkfs_root`` node in the new config, and pull the
+        relevant settings from the parameters into it.
+
         """
         for entry in self.config:
             for k, v in entry.items():
@@ -112,113 +206,47 @@ class BlockDevice(object):
                         if self.params['root-label'] is not None:
                             v['label'] = self.params['root-label']
                         else:
-                            v['label'] = "cloudimg-rootfs"
+                            # The default label is "cloudimg-rootfs"
+                            # for historical reasons (upstream
+                            # images/EC2 defaults/cloud-init etc).  We
+                            # want to remain backwards compatible, but
+                            # unfortunately that's too long for XFS so
+                            # we've decided on 'img-rootfs' in that
+                            # case.  Note there's separate checks if
+                            # the label is specified explicitly.
+                            if v.get('type') == 'xfs':
+                                v['label'] = 'img-rootfs'
+                            else:
+                                v['label'] = 'cloudimg-rootfs'
 
-    @staticmethod
-    def _config_tree_to_digraph(tconfig, plugin_manager):
-        """Converts a possible tree-like config into a complete digraph"""
-        dconfig = []
-        for config_entry in tconfig:
-            if len(config_entry) != 1:
-                logger.error("Invalid config entry: more than one key "
-                             "on top level [%s]" % config_entry)
-                raise BlockDeviceSetupException(
-                    "Top level config must contain exactly one key per entry")
-            logger.debug("Config entry [%s]" % config_entry)
-            config_key = list(config_entry)[0]
-            config_value = config_entry[config_key]
-            name = config_value['name'] \
-                   if 'name' in config_value else None
-            if config_key not in plugin_manager:
-                dconfig.append(config_entry)
-            else:
-                plugin_manager[config_key].plugin \
-                    .tree_config.config_tree_to_digraph(
-                        config_key, config_value, dconfig, name,
-                        plugin_manager)
-        return dconfig
+    def __init__(self, params):
+        """Create BlockDevice object
 
-    @staticmethod
-    def _load_json(file_name):
-        if os.path.exists(file_name):
-            with codecs.open(file_name, encoding="utf-8", mode="r") as fd:
-                return json.load(fd)
-        return None
+        Arguments:
+        :param params: YAML file from --params
+        """
 
-    def __init__(self, args):
         logger.debug("Creating BlockDevice object")
-        logger.debug("Param file [%s]" % args.params)
-        self.args = args
 
-        with open(self.args.params) as param_fd:
-            self.params = yaml.safe_load(param_fd)
-        logger.debug("Params [%s]" % self.params)
+        self.params = params
+        logger.debug("Params [%s]", self.params)
 
         self.state_dir = os.path.join(
             self.params['build-dir'], "states/block-device")
         self.state_json_file_name \
             = os.path.join(self.state_dir, "state.json")
-        self.plugin_manager = extension.ExtensionManager(
-            namespace='diskimage_builder.block_device.plugin',
-            invoke_on_load=False)
         self.config_json_file_name \
             = os.path.join(self.state_dir, "config.json")
+        self.node_pickle_file_name \
+            = os.path.join(self.state_dir, "nodes.pickle")
 
-        self.config = self._load_json(self.config_json_file_name)
-        self.state = self._load_json(self.state_json_file_name)
-        logger.debug("Using state [%s]", self.state)
+        self.config = _load_json(self.config_json_file_name)
 
         # This needs to exists for the state and config files
         try:
             os.makedirs(self.state_dir)
         except OSError:
             pass
-
-    def write_state(self, state):
-        logger.debug("Write state [%s]" % self.state_json_file_name)
-        with open(self.state_json_file_name, "w") as fd:
-            json.dump(state, fd)
-
-    def create_graph(self, config, default_config):
-        logger.debug("Create graph [%s]" % config)
-        # This is the directed graph of nodes: each parse method must
-        # add the appropriate nodes and edges.
-        dg = Digraph()
-
-        for config_entry in config:
-            if len(config_entry) != 1:
-                logger.error("Invalid config entry: more than one key "
-                             "on top level [%s]" % config_entry)
-                raise BlockDeviceSetupException(
-                    "Top level config must contain exactly one key per entry")
-            logger.debug("Config entry [%s]" % config_entry)
-            cfg_obj_name = list(config_entry.keys())[0]
-            cfg_obj_val = config_entry[cfg_obj_name]
-
-            # As the first step the configured objects are created
-            # (if it exists)
-            if cfg_obj_name not in self.plugin_manager:
-                logger.error("Configured top level element [%s] "
-                             "does not exists." % cfg_obj_name)
-                return 1
-            cfg_obj = self.plugin_manager[cfg_obj_name].plugin(
-                cfg_obj_val, default_config)
-            # At this point it is only possible to add the nodes:
-            # adding the edges needs all nodes first.
-            cfg_obj.insert_nodes(dg)
-
-        # Now that all the nodes exists: add also the edges
-        for node in dg.get_iter_nodes_values():
-            node.insert_edges(dg)
-
-        call_order = dg.topological_sort()
-        logger.debug("Call order [%s]" % (list(call_order)))
-        return dg, call_order
-
-    def create(self, result, rollback):
-        dg, call_order = self.create_graph(self.config, self.params)
-        for node in call_order:
-            node.create(result, rollback)
 
     def cmd_init(self):
         """Initialize block device setup
@@ -229,90 +257,207 @@ class BlockDevice(object):
         """
         with open(self.params['config'], "rt") as config_fd:
             self.config = yaml.safe_load(config_fd)
-        logger.debug("Config before merge [%s]" % self.config)
-        self.config = self._config_tree_to_digraph(self.config,
-                                                   self.plugin_manager)
-        logger.debug("Config before merge [%s]" % self.config)
-        self._merge_into_config()
-        logger.debug("Final config [%s]" % self.config)
+        logger.debug("Config before merge [%s]", self.config)
+        self.config = config_tree_to_graph(self.config)
+        logger.debug("Config before merge [%s]", self.config)
+        self._merge_rootfs_params()
+        logger.debug("Final config [%s]", self.config)
         # Write the final config
         with open(self.config_json_file_name, "wt") as fd:
             json.dump(self.config, fd)
-        logger.info("Wrote final block device config to [%s]"
-                    % self.config_json_file_name)
+        logger.info("Wrote final block device config to [%s]",
+                    self.config_json_file_name)
 
-    def cmd_getval(self):
+    def _config_get_mount(self, path):
+        for entry in self.config:
+            for k, v in entry.items():
+                if k == 'mount' and v['mount_point'] == path:
+                    return v
+        assert False
+
+    def _config_get_all_mount_points(self):
+        rvec = []
+        for entry in self.config:
+            for k, v in entry.items():
+                if k == 'mount':
+                    rvec.append(v['mount_point'])
+        return rvec
+
+    def _config_get_mkfs(self, name):
+        for entry in self.config:
+            for k, v in entry.items():
+                if k == 'mkfs' and v['name'] == name:
+                    return v
+        assert False
+
+    def cmd_getval(self, symbol):
         """Retrieve value from block device level
 
-        This is needed for backward compatibility (non python) access
-        to (internal) configuration.
+        The value of SYMBOL is printed to stdout.  This is intended to
+        be captured into bash-variables for backward compatibility
+        (non python) access to internal configuration.
+
+        Arguments:
+        :param symbol: the symbol to get
         """
-        symbol = self.args.symbol
-        logger.info("Getting value for [%s]" % symbol)
-        if symbol == 'image-block-partition':
-            # If there is no partition needed, pass back directly the
-            # image.
-            if 'root' in self.state['blockdev']:
-                print("%s" % self.state['blockdev']['root']['device'])
-            else:
-                print("%s" % self.state['blockdev']['image0']['device'])
+        logger.info("Getting value for [%s]", symbol)
+
+        if symbol == "root-label":
+            root_mount = self._config_get_mount("/")
+            root_fs = self._config_get_mkfs(root_mount['base'])
+            logger.debug("root-label [%s]", root_fs['label'])
+            print("%s" % root_fs['label'])
             return 0
+
+        if symbol == "root-fstype":
+            root_mount = self._config_get_mount("/")
+            root_fs = self._config_get_mkfs(root_mount['base'])
+            logger.debug("root-fstype [%s]", root_fs['type'])
+            print("%s" % root_fs['type'])
+            return 0
+
+        if symbol == 'mount-points':
+            mount_points = self._config_get_all_mount_points()
+            # we return the mountpoints joined by a pipe, because it is not
+            # a valid char in directories, so it is a safe separator for the
+            # mountpoints list
+            print("%s" % "|".join(mount_points))
+            return 0
+
+        # the following symbols all come from the global state
+        # dictionary.  They can only be accessed after the state has
+        # been dumped; i.e. after cmd_create() called.
+        state = BlockDeviceState(self.state_json_file_name)
+
+        # The path to the .raw file for conversion
         if symbol == 'image-path':
-            print("%s" % self.state['blockdev']['image0']['image'])
+            print("%s" % state['blockdev']['image0']['image'])
             return 0
-        logger.error("Invalid symbol [%s] for getval" % symbol)
+
+        # This is the loopback device where the above image is setup
+        if symbol == 'image-block-device':
+            print("%s" % state['blockdev']['image0']['device'])
+            return 0
+
+        # Full list of created devices by name.  Some bootloaders, for
+        # example, want to be able to see their boot partitions to
+        # copy things in.  Intended to be read into a bash array
+        if symbol == 'image-block-devices':
+            out = ""
+            for k, v in state['blockdev'].items():
+                out += " [%s]=%s " % (k, v['device'])
+            print(out)
+            return 0
+
+        logger.error("Invalid symbol [%s] for getval", symbol)
         return 1
+
+    def cmd_writefstab(self):
+        """Creates the fstab"""
+        logger.info("Creating fstab")
+
+        # State should have been created by prior calls; we only need
+        # the dict
+        state = BlockDeviceState(self.state_json_file_name)
+
+        tmp_fstab = os.path.join(self.state_dir, "fstab")
+        with open(tmp_fstab, "wt") as fstab_fd:
+            # This gives the order in which this must be mounted
+            for mp in state['mount_order']:
+                logger.debug("Writing fstab entry for [%s]", mp)
+                fs_base = state['mount'][mp]['base']
+                fs_name = state['mount'][mp]['name']
+                fs_val = state['filesys'][fs_base]
+                if 'label' in fs_val:
+                    diskid = "LABEL=%s" % fs_val['label']
+                else:
+                    diskid = "UUID=%s" % fs_val['uuid']
+
+                # If there is no fstab entry - do not write anything
+                if 'fstab' not in state:
+                    continue
+                if fs_name not in state['fstab']:
+                    continue
+
+                options = state['fstab'][fs_name]['options']
+                dump_freq = state['fstab'][fs_name]['dump-freq']
+                fsck_passno = state['fstab'][fs_name]['fsck-passno']
+
+                fstab_fd.write("%s %s %s %s %s %s\n"
+                               % (diskid, mp, fs_val['fstype'],
+                                  options, dump_freq, fsck_passno))
+
+        target_etc_dir = os.path.join(self.params['build-dir'], 'built', 'etc')
+        exec_sudo(['mkdir', '-p', target_etc_dir])
+        exec_sudo(['cp', tmp_fstab, os.path.join(target_etc_dir, "fstab")])
+
+        return 0
 
     def cmd_create(self):
         """Creates the block device"""
 
         logger.info("create() called")
-        logger.debug("Using config [%s]" % self.config)
+        logger.debug("Using config [%s]", self.config)
 
-        self.state = {}
-        rollback = []
-
+        # Create a new, empty state
+        state = BlockDeviceState()
         try:
-            self.create(self.state, rollback)
-        except BlockDeviceSetupException as bdse:
-            logger.error("exception [%s]" % bdse)
-            for rollback_cb in reversed(rollback):
-                rollback_cb()
-            sys.exit(1)
+            dg, call_order = create_graph(self.config, self.params, state)
+            for node in call_order:
+                node.create()
+        except Exception:
+            logger.exception("Create failed; rollback initiated")
+            reverse_order = reversed(call_order)
+            for node in reverse_order:
+                node.rollback()
+            # save the state for debugging
+            state.save_state(self.state_json_file_name)
+            logger.error("Rollback complete, exiting")
+            raise
 
-        self.write_state(self.state)
+        # dump state and nodes, in order
+        # XXX: we only dump the call_order (i.e. nodes) not the whole
+        #      graph here, because later calls do not need the graph
+        #      at this stage.  might they?
+        state.save_state(self.state_json_file_name)
+        pickle.dump(call_order, open(self.node_pickle_file_name, 'wb'))
 
         logger.info("create() finished")
         return 0
 
     def cmd_umount(self):
         """Unmounts the blockdevice and cleanup resources"""
-        if self.state is None:
+
+        # If the state is not here, cmd_cleanup removed it?  Nothing
+        # more to do?
+        #  XXX: better understand this...
+        if not os.path.exists(self.node_pickle_file_name):
             logger.info("State already cleaned - no way to do anything here")
             return 0
 
-        # Deleting must be done in reverse order
-        dg, call_order = self.create_graph(self.config, self.params)
+        call_order = pickle.load(open(self.node_pickle_file_name, 'rb'))
         reverse_order = reversed(call_order)
 
-        if dg is None:
-            return 0
         for node in reverse_order:
-            node.umount(self.state)
+            node.umount()
 
         return 0
 
     def cmd_cleanup(self):
         """Cleanup all remaining relicts - in good case"""
 
-        # Deleting must be done in reverse order
-        dg, call_order = self.create_graph(self.config, self.params)
+        # Cleanup must be done in reverse order
+        try:
+            call_order = pickle.load(open(self.node_pickle_file_name, 'rb'))
+        except IOError:
+            raise BlockDeviceSetupException("Pickle file not found")
+
         reverse_order = reversed(call_order)
 
         for node in reverse_order:
-            node.cleanup(self.state)
+            node.cleanup()
 
-        logger.info("Removing temporary dir [%s]" % self.state_dir)
+        logger.info("Removing temporary state dir [%s]", self.state_dir)
         shutil.rmtree(self.state_dir)
 
         return 0
@@ -321,13 +466,16 @@ class BlockDevice(object):
         """Cleanup all remaining relicts - in case of an error"""
 
         # Deleting must be done in reverse order
-        dg, call_order = self.create_graph(self.config, self.params)
+        try:
+            call_order = pickle.load(open(self.node_pickle_file_name, 'rb'))
+        except IOError:
+            raise BlockDeviceSetupException("Pickle file not found")
         reverse_order = reversed(call_order)
 
         for node in reverse_order:
-            node.delete(self.state)
+            node.delete()
 
-        logger.info("Removing temporary dir [%s]" % self.state_dir)
+        logger.info("Removing temporary state dir [%s]", self.state_dir)
         shutil.rmtree(self.state_dir)
 
         return 0

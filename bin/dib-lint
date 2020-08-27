@@ -71,19 +71,34 @@ rc=0
 TMPDIR=$(mktemp -d /tmp/tmp.XXXXXXXXXX)
 trap "rm -rf $TMPDIR" EXIT
 
+# Elements have a README.rst file
+for i in $(find $ELEMENTS_DIR -mindepth 1 -maxdepth 1 -type d); do
+    [ -f "${i}/README.rst" ] || error "$i lacks a README.rst"
+done
+
 # note .py files are run through flake8 directly in tox.ini
 for i in $(find $ELEMENTS_DIR -type f \
-                -not -name \*~        \
-                -not -name \#\*\#     \
-                -not -name \*.orig    \
                 -not -name \*.rst     \
                 -not -name \*.yaml    \
-                -not -name \*.py      \
-                -not -name \*.pyc); do
+                -not -name \*.py); do
 
+    # Skip files in .gitignore
+    if git check-ignore -q "$i" ; then
+        echo Skipping $i
+        continue
+    fi
     echo "Checking $i"
 
     exclusions=("$(parse_exclusions $i)")
+
+    # source-repository does a read < $file and can miss the last line
+    # (or only line, if there's only one) when not newline terminated.
+    if [[ $(basename "${i}") =~ "source-repository-" ]]; then
+        nl=$(tail -c 1 ${i})
+        if [[ "${nl}" != "" ]]; then
+            error "$i does not end with a newline"
+        fi
+    fi
 
     # Check that files starting with a shebang are +x
     firstline=$(head -n 1 "$i")
@@ -209,12 +224,34 @@ for i in $(find $ELEMENTS_DIR -type f \
         fi
     fi
 
+    # check that which calls are not used. It is not built in and is missing
+    # from some constrained environments
+    if ! excluded which; then
+        while read LINE
+        do
+            if [[ $LINE =~ "which " ]]; then
+                #  Don't match:
+                #  - explicitly ignored
+                #  - commented
+                if [[ $LINE =~ (dib-lint: which|^#) ]]; then
+                    continue
+                fi
+                error "$i : potential use of which\n -- $LINE"
+            fi
+        done < $i
+    fi
+
 done
 
 echo "Checking indents..."
 
 for i in $(find $ELEMENTS_DIR -type f -and -name '*.rst' -or -type f -executable) \
              $(find $LIB_DIR -type f); do
+    # Skip files in .gitignore
+    if git check-ignore -q "$i" ; then
+        echo Skipping $i
+        continue
+    fi
     # Check for tab indentation
     if ! excluded tabindent; then
         if grep -q $'^ *\t' ${i}; then

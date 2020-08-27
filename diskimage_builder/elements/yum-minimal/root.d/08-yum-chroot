@@ -23,6 +23,8 @@ fi
 set -eu
 set -o pipefail
 
+source $_LIB/common-functions
+
 if [ -f ${TARGET_ROOT}/.extra_settings ] ; then
     . ${TARGET_ROOT}/.extra_settings
 fi
@@ -71,11 +73,44 @@ function _install_repos {
     # (see above) so ...
     packages="basesystem filesystem setup "
 
-    packages+="${DISTRO_NAME}-release "
-    # after fedora21, this is split into into a separate -repos
-    # package
-    if [ $DISTRO_NAME = fedora ]; then
-        packages+="${DISTRO_NAME}-repos "
+    if [[ ${DISTRO_NAME} = fedora && ${DIB_RELEASE} -gt 29 ]]; then
+        packages+="fedora-release-cloud fedora-release-common "
+    else
+        packages+="${DISTRO_NAME}-release "
+    fi
+
+    # Starting in F21 this was split into a separate package
+    if [[ ${DISTRO_NAME} == 'fedora' ]]; then
+        packages+="fedora-repos "
+    fi
+
+    # F27 started putting gpg keys into this separate package
+    if [[ ${DISTRO_NAME} = fedora && ${DIB_RELEASE} -gt 26 ]]; then
+        packages+="fedora-gpg-keys "
+    fi
+
+    # CentOS 8.1 split repositories and GPG keys out into subpackages
+    if [[ ${DISTRO_NAME} = centos && ${DIB_RELEASE} > "7" ]]; then
+        packages+="centos-repos centos-gpg-keys "
+        if [[ "$DIB_RELEASE" =~ (stream) ]]; then
+            packages+="centos-release-stream "
+        fi
+    fi
+
+    # By default, parent elements (fedora-minimal, centos-minimal)
+    # have a yum.repos.d directory in the element with a default repo;
+    # this is copied to TMP_HOOK_PATH by the usual hook-copying
+    # routines.  In the gate, environment.d files for the funtional
+    # tests will set DIB_YUM_MINIMAL_BOOTSTRAP_REPOS -- this contains
+    # mirrors correct for the region setup by contrib/setup-gate-mirrors.sh
+    local repo=${DIB_YUM_MINIMAL_BOOTSTRAP_REPOS:-}
+    if [[ -z ${repo} ]]; then
+        # take in preference more specific subdirs
+        if [[ -d ${TMP_HOOKS_PATH}/yum.repos.d/${DIB_RELEASE} ]]; then
+            repo=${TMP_HOOKS_PATH}/yum.repos.d/${DIB_RELEASE}
+        else
+            repo=${TMP_HOOKS_PATH}/yum.repos.d
+        fi
     fi
 
     # yumdownloader puts repo xml files and such into a directory
@@ -84,9 +119,10 @@ function _install_repos {
     # can clean it up nicely
     local temp_tmp
     temp_tmp=$(mktemp -d)
-    TMPDIR=${temp_tmp} yumdownloader \
-        --releasever=$DIB_RELEASE \
-        --setopt=reposdir=$TMP_HOOKS_PATH/yum.repos.d \
+    TMPDIR=${temp_tmp} yumdownloader --verbose \
+        --releasever=${DIB_RELEASE/-*/} \
+        --setopt=reposdir=$repo \
+        --setopt=cachedir=$temp_tmp \
         --destdir=$WORKING \
         ${packages} && rc=$? || rc=$?
     rm -rf ${temp_tmp}
@@ -97,6 +133,22 @@ function _install_repos {
     # --nodeps works around these wanting /bin/sh in some fedora
     # releases, see rhbz#1265873
     sudo $_RPM --root $TARGET_ROOT --nodeps -ivh $WORKING/*rpm
+
+    # install the bootstrap mirror repos over the default ones, if
+    # set.  we will remove this at the end so the final image has
+    # regular mirrors
+    if [[ -n ${DIB_YUM_MINIMAL_BOOTSTRAP_REPOS:-} ]]; then
+        for repo in $TARGET_ROOT/etc/yum.repos.d/*.repo; do
+            sudo mv $repo $repo.USING_MIRROR
+        done
+        sudo cp ${DIB_YUM_MINIMAL_BOOTSTRAP_REPOS}/* \
+            $TARGET_ROOT/etc/yum.repos.d/
+    fi
+
+    if [[ -n ${DIB_YUM_MINIMAL_EXTRA_REPOS:-} ]]; then
+        sudo cp ${DIB_YUM_MINIMAL_EXTRA_REPOS}/* \
+            $TARGET_ROOT/etc/yum.repos.d/
+    fi
 }
 
 # _install_pkg_manager packages...
@@ -137,49 +189,56 @@ function _install_pkg_manager {
         flock -w 1200 9 || die "Can not lock .rpmmacros"
         echo "%_dbpath /var/lib/rpm" >> $HOME/.rpmmacros
 
-        _lang_pack=""
+        local _lang_pack=""
+        local _extra_pkgs=""
 
-        if [ $DISTRO_NAME = "fedora" -a $DIB_RELEASE -le 23 ]; then
-            # _install_langs is a rpm macro that limits the translation
-            # files, etc installed by packages.  For Fedora 23 [1], the
-            # glibc-common package will obey this to only install the
-            # listed locales, keeping things much smaller (we still have
-            # to clean up locales manually on centos7).  We install just
-            # en_US because people often ssh in with that locale, but
-            # leave out everything else.  Note that yum has an option to
-            # set this from the command-line [2], but the yum in trusty we
-            # are using is too old to have it.  So we set it directly in
-            # the macros file
-            #
-            # [1] http://pkgs.fedoraproject.org/cgit/rpms/glibc.git/commit/glibc.spec?h=f23&id=91764bd9ec690d4b8a886c0a3a104aac12d340d2
-            # [2] http://yum.baseurl.org/gitweb?p=yum.git;a=commit;h=26128173b362474456e8f0642073ecb0322ed031
-            echo "%_install_langs C:en_US:en_US.UTF-8" >> $HOME/.rpmmacros
-        elif [ $DISTRO_NAME = "fedora" -a $DIB_RELEASE -ge 24 ]; then
-            # glibc on F24 has split locales into "langpack" packages.
-            # Yum doesn't understand the weak-dependencies glibc now
-            # uses to get the minimal-langpack and chooses a
-            # random(ish) one that satisfies the locale dependency
-            # (rhbz#1349258).  Work-around this by explicitly requring
-            # the minimal and english (for en_US.UTF-8) pack.
+        if [[ $DISTRO_NAME == "fedora" ]] || \
+            [[ $DISTRO_NAME == "centos" && $DIB_RELEASE > "7" ]]; then
+            # glibc from F24 onwards has split locales into "langpack"
+            # packages.  Host yum doesn't understand the
+            # weak-dependencies glibc now uses to get the
+            # minimal-langpack and chooses a random(ish) one that
+            # satisfies the locale dependency (rhbz#1349258).
+            # Work-around this by explicitly requring the minimal and
+            # english (for en_US.UTF-8) pack.
             _lang_pack="glibc-minimal-langpack glibc-langpack-en"
+        fi
+
+        # Yum has some issues choosing weak dependencies.  It can end
+        # up choosing "coreutils-single" instead of "coreutils" which
+        # causes problems later when a package actually requires
+        # coreutils.  For more info see
+        #  https://bugzilla.redhat.com/show_bug.cgi?id=1286445
+        # Really all we can do is pre-install the right thing
+        _extra_pkgs+="coreutils "
+
+        # Legacy yum reads vars from directory /etc/yum/vars and, unlike dnf,
+        # does not provide setopt=varsdir. So, if $YUM is legacy yum and our
+        # target root is dnf, symlink dnf vars.
+        if [[ ! -d $TARGET_ROOT/etc/yum/vars ]]; then
+            sudo mkdir -p $TARGET_ROOT/etc/yum
+            sudo ln -s $TARGET_ROOT/etc/dnf/vars $TARGET_ROOT/etc/yum/vars
         fi
 
         sudo -E yum -y \
             --disableexcludes=all \
             --setopt=cachedir=$YUM_CACHE/$ARCH/$DIB_RELEASE \
             --setopt=reposdir=$TARGET_ROOT/etc/yum.repos.d \
-            --releasever=$DIB_RELEASE \
+            --releasever=${DIB_RELEASE/-*/} \
             --installroot $TARGET_ROOT \
-            install $@ ${_lang_pack} && rc=$? || rc=$?
+            install $@ ${_lang_pack} ${_extra_pkgs} && rc=$? || rc=$?
 
-        # We modified the base system - make sure we clean up always!
-        rm $HOME/.rpmmacros.dib.lock
+        # we may have symlinked yum/vars -> dnf/vars, unset if so
+        sudo unset $TARGET_ROOT/etc/yum/vars 2>/dev/null || true
+
+        # Note we've modified the base system's .rpmmacros.  Ensure we
+        # clean it up *always*
         # sed makes it easy to remove last line, but not last n lines...
         sed -i '$ d' $HOME/.rpmmacros; sed -i '$ d' $HOME/.rpmmacros;
         if [ $rc != 0 ]; then
             die "Initial yum install to chroot failed!  Can not continue."
         fi
-    ) 9>$HOME/.rpmmacros.dib.lock
+    ) 9>$DIB_LOCKFILES/.rpmmacros.dib.lock
 
     # Set gpg path back because subsequent actions will take place in
     # the chroot
@@ -194,7 +253,7 @@ function _install_pkg_manager {
 sudo mkdir -p $TARGET_ROOT/proc $TARGET_ROOT/dev $TARGET_ROOT/sys
 sudo mount -t proc none $TARGET_ROOT/proc
 sudo mount --bind /dev $TARGET_ROOT/dev
-sudo mount --bind /dev/pts $TARGET_ROOT/dev/pts
+sudo mount -t devpts $(mount_dev_pts_options) devpts $TARGET_ROOT/dev/pts
 sudo mount -t sysfs none $TARGET_ROOT/sys
 
 # initalize rpmdb
@@ -214,39 +273,61 @@ sudo mount --bind $YUM_CACHE $TMP_MOUNT_PATH/tmp/yum
 
 _install_repos
 
-# install dnf for >= f22
-if [ $DIB_RELEASE -ge 22 ]; then
-    _install_pkg_manager dnf dnf-plugins-core yum
+# Install package manager
+
+# We are somewhat fighting against the "yum" version on the host to
+# get things installed correctly.  Fedora 27 onwards has a
+# "curl-minimal" package that will get pulled in by default for the
+# initial install (ianw: I think because the yum doesn't understand
+# weak dependencies correctly).  This causes problems later if/when
+# "curl" gets installed (you need to add --allowerasing to let dnf get
+# rid of the old package).  To avoid this, just install the full curl
+# and first up.  On Centos, it's different again and we need to
+# specify libcurl as well, or the minimal libcurl packages come in
+# causing similar problems.  *But* -- we can't also do that on Fedora
+# it seems, as it seems like as part of the Fedora modular updates
+# (https://docs.fedoraproject.org/en-US/modularity/) we can pick up
+# seemingly mismatched libraries.
+if [[ ${DISTRO_NAME} == 'fedora' ]]; then
+    _install_pkg_manager dnf dnf-plugins-core curl
+elif [[ ${DISTRO_NAME} == centos && $DIB_RELEASE > "7" ]]; then
+    _install_pkg_manager dnf dnf-plugins-core curl libcurl
 else
     _install_pkg_manager yum
 fi
 
+# sort of like run_in_target; but we're not in a phase where that
+# works yet.  strip unnecessary external env vars that can cause
+# problems.
+function _run_chroot {
+    local cmd="$@"
+    sudo -E chroot $TARGET_ROOT env -u TMPDIR sh -c "$cmd"
+}
+
 # we just installed yum/dnf with "outside" tools (yum/rpm) which
 # might have created /var/lib/[yum|rpm] (etc) that are slighlty
 # incompatible.  Refresh everything with the in-chroot tools
-sudo -E chroot $TARGET_ROOT rpm --rebuilddb
-sudo -E chroot $TARGET_ROOT ${YUM} clean all
+_run_chroot rpm --rebuilddb
+_run_chroot ${YUM} clean all
 
 # populate the lang reduction macro in the chroot
 echo "%_install_langs C:en_US:en_US.UTF-8" | \
     sudo tee -a $TARGET_ROOT/etc/rpm/macros.langs > /dev/null
 
-# bootstrap the environment within the chroot; bring in new
-# metadata with an update and install some base packages we need.
-sudo -E chroot $TARGET_ROOT ${YUM} -y update
-sudo -E chroot $TARGET_ROOT ${YUM} -y \
-    --setopt=cachedir=/tmp/yum/$ARCH/$DIB_RELEASE \
-    install systemd passwd findutils sudo util-linux-ng
+_base_packages="systemd passwd findutils sudo util-linux-ng "
 
 # This package is split out from systemd on >F24, dracut is
 # missing the dependency and will fail to make an initrd without
 # it; see
 #  https://bugzilla.redhat.com/show_bug.cgi?id=1398505
-if [ $DISTRO_NAME = "fedora" -a $DIB_RELEASE -ge 24 ]; then
-    sudo -E chroot $TARGET_ROOT ${YUM} -y \
-        --setopt=cachedir=/tmp/yum/$ARCH/$DIB_RELEASE \
-        install systemd-udev
-fi
+_base_packages+="systemd-udev "
+
+# bootstrap the environment within the chroot; bring in new
+# metadata with an update and install some base packages we need.
+_run_chroot ${YUM} -y update
+_run_chroot ${YUM} -y \
+    --setopt=cachedir=/tmp/yum/$ARCH/$DIB_RELEASE \
+    install ${_base_packages}
 
 # Put in a dummy /etc/resolv.conf over the temporary one we used
 # to bootstrap.  systemd has a bug/feature [1] that it will assume
@@ -261,7 +342,7 @@ echo -e "# This file intentionally left blank\n" | \
 echo -e 'LANG="en_US.UTF-8"' | \
     sudo tee $TARGET_ROOT/etc/locale.conf
     # default to UTC
-sudo -E chroot $TARGET_ROOT ln -sf /usr/share/zoneinfo/UTC \
+_run_chroot ln -sf /usr/share/zoneinfo/UTC \
     /etc/localtime
 
 # cleanup

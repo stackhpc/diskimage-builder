@@ -1,4 +1,6 @@
 dhcp-all-interfaces
+ibft-interfaces
+install-static
 no-final-image
 package-installs
 pip-and-virtualenv

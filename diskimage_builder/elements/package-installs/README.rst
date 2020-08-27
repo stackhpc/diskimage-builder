@@ -30,6 +30,12 @@ example ``package-installs.yaml``
     dib_python_version: 2
   python3-dev:
     dib_python_version: 3
+  libssl-dev:
+    build-only: True
+  package-a:
+    when: DIB_USE_PACKAGE_A = 1
+  package-b:
+    when: DIB_USE_PACKAGE_A != 1
 
 example package-installs.json
 
@@ -56,11 +62,62 @@ Setting the installtype property causes the package only to be installed if
 the specified installtype would be used for the element. See the
 diskimage-builder docs for more information on installtypes.
 
+Setting ``build-only`` will cause the package to be added both to the
+list of packages to be installed and to the list of packages to be
+uninstalled. This allows expressing build-time dependencies that should
+not end up in the final image.
+
 The ``arch`` property is a comma-separated list of architectures to
 install for.  The ``not-arch`` is a comma-separated list of
 architectures the package should be excluded from.  Either ``arch`` or
 ``not-arch`` can be given for one package - not both.  See
 documentation about the ARCH variable for more information.
+
+The ``when`` property is a simple ``=`` or ``!=`` match on a value in
+an environment variable.  If the given environment variable matches
+the operation and value, the package is installed.  If the variable is
+not available in the environment, an exception is raised (thus
+defaults will likely need to be provided in ``environment.d`` files or
+similar for flags used here).  For example, to install an extra
+package when a feature is enabled::
+
+  package:
+    when: DIB_FEATURE_FLAG=1
+
+To install ``package`` when ``DIB_FEATURE_FLAG=0`` but
+``other_package`` when ``DIB_FEATURE_FLAG=1`` (i.e. toggle between two
+packages), you can use something like::
+
+  package:
+    when: DIB_FEATURE_FLAG=0
+  other_package:
+    when: DIB_FEATURE_FLAG!=0
+
+You can also use a list of items in the ``when`` statement, which will
+be effectively combined with *and*.
+
+If you need to filter multiple paths for a single package, you can
+make the parameters a list.  For example, if ``linux-image-generic``
+package should be installed when ``DIB_UBUNTU_KERNEL =
+linux-image-generic`` is set *except* on ``arm64`` Xenial hosts, where
+we would like to install ``linux-generic-hwe-16.04`` you could use the
+following:
+
+.. code-block:: YAML
+
+ linux-image-generic:
+  - not-arch: arm64
+    when: DIB_UBUNTU_KERNEL = linux-image-generic
+  - arch: arm64
+    when:
+     - DIB_RELEASE != xenial
+     - DIB_UBUNTU_KERNEL = linux-image-generic
+
+ linux-generic-hwe-16.04:
+   arch: arm64
+   when:
+    - DIB_RELEASE = xenial
+    - DIB_UBUNTU_KERNEL = linux-image-generic
 
 DEPRECATED: Adding a file under your elements pre-install.d, install.d, or
 post-install.d directories called package-installs-<element-name> will cause

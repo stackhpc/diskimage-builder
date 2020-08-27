@@ -1,13 +1,16 @@
 .coverage
 coverage.xml
 cover/*
+doc/source/developer/api/
 *~
 .testrepository
 *.sw?
+#*#
 *.pyc
 .tox
 *.egg
 *.egg-info
+*.eggs
 dist
 *.qcow2
 *.raw
@@ -15,6 +18,7 @@ dist
 *.vmlinuz
 /*-manifests
 /*.d
+!/.zuul.d
 build
 AUTHORS
 ChangeLog

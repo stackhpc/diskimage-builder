@@ -1,8 +1,15 @@
 ============
 ironic-agent
 ============
+warning::
+ This element is deprecated and copied to
+ ironic-python-agent-builder and can be found at:
+ https://opendev.org/openstack/ironic-python-agent-builder/src/branch/master/dib/ironic-python-agent-ramdisk
+ The ramdisk can be build from the ironic-python-agent-builder and
+ the "ironic-element" in diskimage-builder is deprecated.
+
 Builds a ramdisk with ironic-python-agent.  More information can be found at:
-    https://git.openstack.org/cgit/openstack/ironic-python-agent/
+    https://opendev.org/openstack/ironic-python-agent/
 
 Beyond installing the ironic-python-agent, this element does the following:
 

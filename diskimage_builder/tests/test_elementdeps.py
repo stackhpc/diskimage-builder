@@ -27,15 +27,17 @@ data_dir = os.path.abspath(
 
 
 def _populate_element(element_dir, element_name, element_deps=[], provides=[]):
-        logger.debug("Populate %s <%s>" % (element_name, element_dir))
-        element_home = os.path.join(element_dir, element_name)
-        os.mkdir(element_home)
-        deps_path = os.path.join(element_home, 'element-deps')
-        with open(deps_path, 'w') as deps_file:
-            deps_file.write("\n".join(element_deps))
+    logger.debug("Populate %s <%s>", element_name, element_dir)
+    element_home = os.path.join(element_dir, element_name)
+    os.mkdir(element_home)
+    deps_path = os.path.join(element_home, 'element-deps')
+
+    with open(deps_path, 'w') as deps_file:
+        deps_file.write("\n".join(element_deps))
         provides_path = os.path.join(element_home, 'element-provides')
-        with open(provides_path, 'w') as provides_file:
-            provides_file.write("\n".join(provides))
+
+    with open(provides_path, 'w') as provides_file:
+        provides_file.write("\n".join(provides))
 
 
 class TestElementDeps(testtools.TestCase):
@@ -63,6 +65,10 @@ class TestElementDeps(testtools.TestCase):
         _populate_element(self.element_dir, 'self', ['self'])
         _populate_element(self.element_dir,
                           'provides_virtual',
+                          [],
+                          ['virtual'])
+        _populate_element(self.element_dir,
+                          'also_provides_virtual',
                           [],
                           ['virtual'])
         _populate_element(self.element_dir,
@@ -94,16 +100,16 @@ class TestElementDeps(testtools.TestCase):
 
     # helper to return an (element, path) tuple from the standard dir
     def _e(self, element):
-            return (element, os.path.join(self.element_dir, element))
+        return (element, os.path.join(self.element_dir, element))
 
     # helper to return an (element, path) tuple from the override dir
     def _eo(self, element):
-            return (element, os.path.join(self.element_override_dir, element))
+        return (element, os.path.join(self.element_override_dir, element))
 
     def test_non_transitive_deps(self):
         result = element_dependencies.get_elements(['requires-foo'],
                                                    self.element_dirs)
-        self.assertItemsEqual([self._e('foo'), self._e('requires-foo')],
+        self.assertCountEqual([self._e('foo'), self._e('requires-foo')],
                               result)
 
     def test_missing_deps(self):
@@ -125,7 +131,7 @@ class TestElementDeps(testtools.TestCase):
         result = element_dependencies.get_elements(
                 ['requires-requires-foo'], self.element_dirs)
 
-        self.assertItemsEqual([self._e('requires-requires-foo'),
+        self.assertCountEqual([self._e('requires-requires-foo'),
                                self._e('requires-foo'),
                                self._e('foo')], result)
 
@@ -136,20 +142,20 @@ class TestElementDeps(testtools.TestCase):
     def test_self(self):
         result = element_dependencies.get_elements(['self', 'foo'],
                                                    self.element_dirs)
-        self.assertItemsEqual([self._e('self'),
+        self.assertCountEqual([self._e('self'),
                                self._e('foo')], result)
 
     def test_circular(self):
         result = element_dependencies.get_elements(['circular1'],
                                                    self.element_dirs)
-        self.assertItemsEqual([self._e('circular1'),
+        self.assertCountEqual([self._e('circular1'),
                                self._e('circular2')], result)
 
     def test_provide(self):
         result = element_dependencies.get_elements(
                 ['provides_virtual', 'requires_virtual'],
                 self.element_dirs)
-        self.assertItemsEqual([self._e('requires_virtual'),
+        self.assertCountEqual([self._e('requires_virtual'),
                                self._e('provides_virtual')], result)
 
     def test_provide_conflict(self):
@@ -162,9 +168,17 @@ class TestElementDeps(testtools.TestCase):
         result = element_dependencies.get_elements(
                 ['requires_new_virtual', 'provides_new_virtual'],
                 self.element_dirs)
-        self.assertItemsEqual(
+        self.assertCountEqual(
                 [self._e('requires_new_virtual'),
                  self._e('provides_new_virtual')], result)
+
+    def test_elements_provide_same(self):
+        msg = r"virtual: already provided by \['provides_virtual'\]"
+        self.assertRaisesRegex(element_dependencies.AlreadyProvidedException,
+                               msg,
+                               element_dependencies.get_elements,
+                               ['provides_virtual', 'also_provides_virtual'],
+                               self.element_dirs)
 
     def test_no_os_element(self):
         self.assertRaises(element_dependencies.MissingOSException,
@@ -188,7 +202,7 @@ class TestElementDeps(testtools.TestCase):
         # not the base dir
         result = element_dependencies.get_elements(['override_element', 'foo'],
                                                    self.element_dirs)
-        self.assertItemsEqual([self._e('foo'),
+        self.assertCountEqual([self._e('foo'),
                                self._eo('override_element')],
                               result)
 
@@ -196,7 +210,7 @@ class TestElementDeps(testtools.TestCase):
         # test the deprecated expand_dependencies call
         result = element_dependencies.expand_dependencies(
                 ['foo', 'requires-foo'], self.element_dirs)
-        self.assertItemsEqual(['foo', 'requires-foo'], result)
+        self.assertCountEqual(['foo', 'requires-foo'], result)
 
     def test_output_sanity(self):
         # very basic output sanity test

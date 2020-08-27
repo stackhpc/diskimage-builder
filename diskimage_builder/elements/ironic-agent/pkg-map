@@ -1,14 +1,22 @@
 {
-  "distro": {
+  "release": {
     "rhel": {
-      "tgt": "targetcli",
-      "curl": "curl",
-      "ironic-python-agent": "openstack-ironic-python-agent"
+      "8": {
+        "tgt": "target-restore",
+        "curl": "curl",
+        "ironic-python-agent": "openstack-ironic-python-agent",
+        "qemu-utils": "qemu-img",
+        "python-dev": "python3-devel"
+      }
     },
-    "centos":{
-      "tgt": "scsi-target-utils",
-      "curl": "curl",
-      "ironic-python-agent": "openstack-ironic-python-agent"
+    "centos": {
+      "8": {
+        "tgt": "target-restore",
+        "curl": "curl",
+        "ironic-python-agent": "openstack-ironic-python-agent",
+        "qemu-utils": "qemu-img",
+        "python-dev": "python3-devel"
+      }
     }
   },
   "family": {

@@ -17,7 +17,7 @@ on your local infrastructure (e.g. Squid cache, or an APT or Yum proxy) to
 facilitate caching of that layer, so you need to arrange independently for
 offline mode. For more information about setting up a squid proxy, consult the
 `TripleO documentation
-<http://docs.openstack.org/developer/tripleo-incubator/devtest_setup.html#f3>`_.
+<https://docs.openstack.org/tripleo-incubator/latest/devtest_setup.html>`_.
 
 Base images
 -----------
@@ -31,12 +31,6 @@ source-repositories
 
 Git repositories and tarballs obtained via the
 :doc:`../elements/source-repositories/README` element will be cached.
-
-C and C++ compilation
----------------------
-
-Ccache is configured by the :doc:`../elements/base/README` element. Any
-compilation that honours ccache will be cached.
 
 PyPI
 ----

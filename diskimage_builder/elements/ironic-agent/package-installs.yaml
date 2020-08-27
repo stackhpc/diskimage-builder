@@ -2,9 +2,9 @@ tgt:
 curl:
 # dmidecode does not exist for ppc* arches so we use lshw
 dmidecode:
-    not-arch: ppc64,ppc64el
+    not-arch: ppc64,ppc64el,ppc64le
+iptables:
 lshw:
-    arch: ppc64, ppc64el
 ipmitool:
 qemu-utils:
 gcc:
@@ -17,3 +17,9 @@ gdisk:
 kmod:
 psmisc:
 dosfstools:
+mdadm:
+# efibootmgr and efivar do not exist for ppc*
+efibootmgr:
+    not-arch: ppc64,ppc64el,ppc64le
+efivar:
+    not-arch: ppc64,ppc64el,ppc64le

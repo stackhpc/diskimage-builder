@@ -4,7 +4,6 @@
       "iscsi_package": "iscsi-initiator-utils"
     },
     "gentoo": {
-      "ccache_package": "dev-util/ccache",
       "curl": "net-misc/curl",
       "dhcp_client": "net-misc/dhcp",
       "extlinux": "sys-boot/syslinux",
@@ -23,10 +22,12 @@
       "syslinux-common": "",
       "tftp": "net-ftp/tftp-hpa",
       "tgt": "sys-block/tgt"
+    },
+    "suse": {
+      "qemu-utils": "qemu-tools"
     }
   },
   "default": {
-    "ccache_package": "ccache",
     "iscsi_package": "open-iscsi"
   }
 }
