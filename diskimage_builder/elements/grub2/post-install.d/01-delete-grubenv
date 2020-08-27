@@ -11,3 +11,16 @@ set -o pipefail
 # Delete /boot/grub2/grubenv if it exists because
 # it will fail while doing grub-install again.
 rm -f /boot/grub2/grubenv
+
+# Rename grubenv.rpmnew link if it exists and move grub.cfg into EFI partition 
+# on CentOS because it will cause EFI boot failures on recent grub versions.
+if [[ "${DIB_BLOCK_DEVICE}" == "efi" && "${DISTRO_NAME}" == "centos" ]]; then
+    if [ -L /boot/grub2/grubenv.rpmnew ]; then
+        mv /boot/grub2/grubenv.rpmnew /boot/grub2/grubenv
+    fi
+    if [ -r /boot/grub2/grub.cfg ]; then
+        mv /boot/grub2/grub.cfg /boot/efi/EFI/centos/
+        cd /boot/grub2
+        ln -sf ../efi/EFI/centos/grub.cfg .
+    fi
+fi
