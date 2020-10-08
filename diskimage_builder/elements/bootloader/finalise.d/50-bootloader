@@ -252,7 +252,7 @@ if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
     # earlier in the build process.
     if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
         /bin/cp $GRUB_CFG /boot/efi/EFI/centos/grub.cfg
-        /bin/cp /boot/efi/EFI/centos/shim.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
+        /bin/cp /boot/efi/EFI/centos/shimx64.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
     fi
 fi
 
