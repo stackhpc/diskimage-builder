@@ -253,7 +253,9 @@ if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
     if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
         /bin/cp $GRUB_CFG /boot/efi/EFI/centos/grub.cfg
         /bin/cp /boot/grub2/grubenv /boot/efi/EFI/centos/grubenv
-        /bin/cp /boot/efi/EFI/centos/shimx64.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
+	if [ -f /boot/efi/EFI/centos/shimx64.efi ]; then
+            /bin/cp /boot/efi/EFI/centos/shimx64.efi /boot/efi/EFI/BOOT/BOOTX64.EFI
+	fi
     fi
 fi
 
