@@ -20,7 +20,7 @@ elif [[ ${DIB_RELEASE} > '7' && ${DIB_RELEASE} < '8' || ${DIB_RELEASE} > '8' && 
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-centosplus.repo
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Extras.repo
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-PowerTools.repo
-elif [[ ${DIB_RELEASE} == '8' || ${DIB_RELEASE} >= '8.3' ]]; then
+elif [[ ${DIB_RELEASE} == '8' || ${DIB_RELEASE} == '8.3' || ${DIB_RELEASE} > '8.3' ]]; then
     # CentOS 8.3 renamed the repo files
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-BaseOS.repo
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-AppStream.repo
