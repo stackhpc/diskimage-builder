@@ -22,18 +22,18 @@ elif [[ ${DIB_RELEASE} > '7' && ${DIB_RELEASE} < '8' || ${DIB_RELEASE} > '8' && 
     sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-PowerTools.repo
 elif [[ ${DIB_RELEASE} == '8' || ${DIB_RELEASE} >= '8.3' ]]; then
     # CentOS 8.3 renamed the repo files
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-BaseOS.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-AppStream.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-ContinuousRelease.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Debuginfo.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Devel.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Extras.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-FastTrack.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-HighAvailability.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Media.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Plus.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-PowerTools.repo
-    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Sources.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-BaseOS.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-AppStream.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-ContinuousRelease.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Debuginfo.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Devel.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Extras.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-FastTrack.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-HighAvailability.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Media.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Plus.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-PowerTools.repo
+    sed -e "s,^#baseurl=http[s]*://mirror.centos.org/\$contentdir/\$releasever/,baseurl=$DIB_DISTRIBUTION_MIRROR/,;/^mirrorlist=/d" -i /etc/yum.repos.d/CentOS-Linux-Sources.repo
 fi
 
 # CentOS Stream releases (e.g. 8-stream, 9-stream)
