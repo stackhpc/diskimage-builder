@@ -141,7 +141,7 @@ fi
 # the 16 suffix is added to linux/initrd entries, but we need it to be
 # linuxefi/initrdefi for the image to boot under efi
 if [[ ${DIB_BLOCK_DEVICE} == "efi" ]]; then
-    sed -i 's%\(linux\|initrd\)16 /boot%\1efi /boot%g' $GRUB_CFG
+    sed -i 's%\(linux\|initrd\)\(16\)\{0,1\} /boot%\1efi /boot%g' $GRUB_CFG
 
     # Finally copy the grub.cfg and grubenv to the EFI specific dir
     # to support functionality like secure boot. We make a copy because
