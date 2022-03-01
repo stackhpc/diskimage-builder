@@ -111,7 +111,7 @@ else
             "x86_64"|"amd64")
                 # This call installs grub for BIOS compatability
                 # which makes portable EFI/BIOS images.
-                $GRUBNAME --modules="$modules" --target=i386-pc $BOOT_DEV
+                $GRUBNAME --modules="$modules linux" --target=i386-pc $BOOT_DEV
                 # Set the x86_64 specific efi target for the generic
                 # installation below.
                 GRUB_OPTS="--target=x86_64-efi"
@@ -127,7 +127,7 @@ else
             # the generic /BOOT directory and avoids trying to update
             # nvram settings.
             extra_options="--removable"
-            $GRUBNAME --modules="$modules" $extra_options $GRUB_OPTS $BOOT_DEV
+            $GRUBNAME --modules="$modules linux" $extra_options $GRUB_OPTS $BOOT_DEV
         fi
     fi
 fi
