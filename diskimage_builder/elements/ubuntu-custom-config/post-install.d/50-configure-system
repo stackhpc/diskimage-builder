@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Prevent cloud-init from overwriting custom sources.list
+echo '#cloud-config' > /etc/cloud/cloud.cfg.d/50_change_sources.cfg
+echo 'apt_preserve_sources_list: true' >> /etc/cloud/cloud.cfg.d/50_change_sources.cfg
