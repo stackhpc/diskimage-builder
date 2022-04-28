@@ -103,7 +103,8 @@ class Element(object):
         self.depends = self._get_element_set(
             os.path.join(path, 'element-deps'))
 
-        logger.debug("New element : %s", str(self))
+        # Uncomment to see all elements and deps listed as they're found
+        # logger.debug("New element : %s", str(self))
 
     def __eq__(self, other):
         return self.name == other.name
@@ -151,9 +152,14 @@ def _expand_element_dependencies(user_elements, all_elements):
 
         element_deps = element_obj.depends
         element_provides = element_obj.provides
-        # save which elements provide another element for potential
-        # error message
+        # Check that we are not providing an element which has already
+        # been provided by someone else, and additionally save which
+        # elements provide another element
         for provide in element_provides:
+            if provide in provided:
+                raise AlreadyProvidedException(
+                    "%s: already provided by %s" %
+                    (provide, provided_by[provide]))
             provided_by[provide].append(element)
         provided.update(element_provides)
         check_queue.extend(element_deps - (final_elements | provided))
@@ -164,8 +170,8 @@ def _expand_element_dependencies(user_elements, all_elements):
         logger.error(
             "The following elements are already provided by another element")
         for element in conflicts:
-            logger.error("%s : already provided by %s" %
-                         (element, provided_by[element]))
+            logger.error("%s : already provided by %s",
+                         element, provided_by[element])
         raise AlreadyProvidedException()
 
     if "operating-system" not in provided:
@@ -200,7 +206,7 @@ def _find_all_elements(paths=None):
     else:
         paths = list(reversed(paths.split(':')))
 
-    logger.debug("ELEMENTS_PATH is: %s" % ":".join(paths))
+    logger.debug("ELEMENTS_PATH is: %s", ":".join(paths))
 
     for path in paths:
         if not os.path.isdir(path):
@@ -274,15 +280,15 @@ def expand_dependencies(user_elements, element_dirs):
 
     .. warning::
 
-       DO NOT USE THIS FUNCTION.  For compatability reasons, this
+       DO NOT USE THIS FUNCTION.  For compatibility reasons, this
        function does not provide paths to the returned elements.  This
        means the caller must process override rules if two elements
        with the same name appear in element_dirs
 
     :param user_elements: iterable enumerating the elements a user requested
-    :param elements_dir: The ELEMENTS_PATH to process
+    :param element_dirs: The ELEMENTS_PATH to process
 
-    :return: a set contatining user_elements and all dependent
+    :return: a set containing user_elements and all dependent
              elements including any transitive dependencies.
     """
     logger.warning("expand_dependencies() deprecated, use get_elements")
@@ -339,10 +345,11 @@ def main():
     if args.env:
         _output_env_vars(elements)
     else:
-        # deprecated compatability output; doesn't include paths.
+        # deprecated compatibility output; doesn't include paths.
         print(' '.join([element.name for element in elements]))
 
     return 0
+
 
 if __name__ == "__main__":
     main()

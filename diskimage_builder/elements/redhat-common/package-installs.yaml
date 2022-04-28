@@ -6,3 +6,12 @@ traceroute:
 which:
 gettext:
     phase: pre-install.d
+ca-certificates:
+
+# selinux-targeted policy and related tools
+selinux-policy:
+selinux-policy-targeted:
+python3-libselinux:
+python3-policycoreutils:
+policycoreutils-python-utils:
+rng-tools:

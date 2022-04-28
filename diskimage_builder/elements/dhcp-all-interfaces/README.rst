@@ -24,6 +24,18 @@ Environment Variables
 DIB_DHCP_TIMEOUT
   :Required: No
   :Default: 30
-  :Description: Amount of time in seconds that the systemd service will
-   wait to get an address.
+  :Description: Amount of time in seconds that the systemd service(or dhclient)
+   will wait to get an address. Should be increased in networks such as
+   Infiniband.
   :Example: DIB_DHCP_TIMEOUT=300
+
+DIB_DHCP_NETWORK_MANAGER_AUTO
+  :Required: No
+  :Default: false
+  :Description: When NetworkManager is detected, and this is set to true the
+   dhcp-all-interfaces service will not be installed. Only the NetworkManager
+   configuration will be added. NetworkManager is quite capable to do automatic
+   interface configuration. NetworkManager will by default try to
+   auto-configure any interface with no configuration, it will use DHCP for
+   IPv4 and Router Advertisements to decide how to initialize IPv6.
+  :Example: DIB_DHCP_NETWORK_MANAGER_AUTO=true

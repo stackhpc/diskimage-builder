@@ -20,15 +20,17 @@ customize cloud-init's management of `/etc/hosts`:
    preserve diskimage-builder's current default behavior in the
    future, set the variable to "localhost" explicitly.)
 
+The 'DIB_AVOID_PACKAGES_UPDATE' environment variable can be used to
+avoid updating all packages, useful when wanting to avoid release
+update.
+
+ * 'DIB_AVOID_PACKAGES_UPDATE' default is '0', all packages will be updated.
+
+ * set 'DIB_AVOID_PACKAGES_UPDATE' to '1' to avoid updating all packages.
+
 Notes:
 
  * If you are getting warnings during the build about your locale
    being missing, consider installing/generating the relevant locale.
    This may be as simple as having language-pack-XX installed in the
    pre-install stage
-
- * This element ensures /tmp/ccache will be available in the chroot
-   during the root, extra-data, pre-install, install and post-install
-   stages.  /tmp/ccache is unavailable during block-device, finalise
-   and cleanup stages as it will have been automatically unmounted
-   by then.

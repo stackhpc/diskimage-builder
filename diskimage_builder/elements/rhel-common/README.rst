@@ -24,15 +24,15 @@ Satellite.  An activation key can only be used for registration purposes using
 the subscription-manager command line tool and is considered a lower security
 risk.
 
-IMPORTANT NOTE:
+IMPORTANT NOTES:
 ----------------
 The 00-rhsm script is specific to RHEL6.  If you use the REG\_ variables to
 use with RHEL7, you do not need to set any DIB_RHSM variables.  The scripts
 named with "rhel-registration" have not been developed or tested for RHEL6.
 For information on building RHEL6 images, please see the rhel element README.
 
-Environment Variables For Image Creation
-----------------------------------------
+Environment Variables For Registration during Image Creation
+------------------------------------------------------------
 The following environment variables are used for registering a RHEL instance
 with either the Red Hat Customer Portal or Satellite 6.
 
@@ -100,6 +100,8 @@ A single string representing a list of repository names separated by a
 comma (No spaces).  Each of the repositories in this string are enabled
 through subscription manager.  Once you've attached a subscription, you can
 find available repositories by running subscription-manager repos --list.
+No base repos will be added when REG_REPOS is set, so these must be included
+in REG_REPOS.
 
 #### REG\_SERVER\_URL
 Gives the hostname of the subscription service to use. The default is
@@ -210,6 +212,10 @@ Heat metadata can be used to configure the rhel-common element.
             # system with the Red Hat Customer Portal.  Use "satellite" to
             # register a system with Red Hat Satellite 6.  Use "disable" to
             # skip the registration process.
+        satellite_cert:
+            # Defines the ssl certificate to be installed when using "satellite"
+            # as register mechanism. Default values of this is
+            # "katello-ca-consumer-latest.noarch.rpm".
 
 Configuration Registration Examples
 ------------------------------------
@@ -239,4 +245,3 @@ use the following metadata::
             "method":"portal"
         }
     }
-

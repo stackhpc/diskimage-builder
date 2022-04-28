@@ -20,6 +20,24 @@ fi
 set -eu
 set -o pipefail
 
+# env is not sourced with user specified package inclusions
+# set the default bash array if GENTOO_EMERGE_ENV is not defined as an array
+if ! declare -p GENTOO_EMERGE_ENV  2> /dev/null | grep -q '^declare \-a'; then
+    declare -a GENTOO_EMERGE_ENV
+    GENTOO_EMERGE_ENV+=("USE=\"-build\"")
+    GENTOO_EMERGE_ENV+=("FEATURES=\"binpkg-multi-instance buildpkg parallel-fetch parallel-install\"")
+    GENTOO_EMERGE_ENV+=("PKGDIR=\"/tmp/portage-pkgdir\"")
+    GENTOO_EMERGE_ENV+=("DISTDIR=\"/tmp/portage-distdir\"")
+    GENTOO_EMERGE_ENV+=("PORTDIR=\"/tmp/portage-portdir\"")
+    export GENTOO_EMERGE_ENV
+fi
+# iterate over the array, exporting each 'line'
+for (( i=0; i<${#GENTOO_EMERGE_ENV[@]}; i++ )); do
+    eval export "${GENTOO_EMERGE_ENV[i]}"
+done
+# set default opts
+GENTOO_EMERGE_DEFAULT_OPTS=${GENTOO_EMERGE_DEFAULT_OPTS:-"--binpkg-respect-use --rebuilt-binaries=y --usepkg=y --with-bdeps=y --binpkg-changed-deps=y --quiet --jobs=2 --autounmask=n"}
+
 ACTION='install'
 
 SCRIPTNAME="$(basename $0)"
@@ -32,55 +50,15 @@ function show_options {
     exit 0
 }
 
-function fix_shm {
-    # make /dev/shm dir if it doesn't exist
-    # mount tmpfs and chown it
-    # existing programs could be using /dev/shm
-    #  This means it cannot be moved or backed
-    #  up as a copy easily.  The only remaining
-    #  option is to move the link if it exists
-    #  as a link.  Existing programs will still
-    #  hold the file handle of the original
-    #  location open and new programs can use
-    #  the fixed /dev/shm.
-    if [[ "${RUN_ONCE_SHM}" == '1' ]]; then
-        if [[ ! -d /dev/shm ]]; then
-            if [[ ! -e /dev/shm ]]; then
-                if [[ -L /dev/shm ]]; then
-                    mv /dev/shm /dev/shm.orig
-                fi
-                mkdir /dev/shm
-            fi
-        fi
-        mount -t tmpfs none /dev/shm
-        chmod 1777 /dev/shm
-        RUN_ONCE_SHM='0'
-    fi
-}
-
-function unfix_shm {
-    # unmount tmpfs
-    # care about anything still using it
-    if [[ "${RUN_ONCE_SHM}" == '0' ]]; then
-        umount /dev/shm
-        if fuser /dev/shm; then
-            rmdir /dev/shm
-        fi
-        if [[ -e /dev/shm.orig ]]; then
-            mv /dev/shm.orig /dev/shm
-        fi
-    fi
-}
-
 function install_gentoo_packages {
     RUN_ONCE_SHM='1'
-    if grep -q /dev/shm /proc/mounts; then
-        emerge $@
+    if mountpoint -q /dev/shm; then
+        emerge ${GENTOO_EMERGE_DEFAULT_OPTS} $@
     elif [[ -k /dev/shm ]]; then
-        emerge $@
+        emerge ${GENTOO_EMERGE_DEFAULT_OPTS} $@
     else
         fix_shm
-        emerge $@
+        emerge ${GENTOO_EMERGE_DEFAULT_OPTS} $@
         unfix_shm
     fi
 }
@@ -95,12 +73,12 @@ eval set -- "${TEMP}"
 while true; do
     case "${1}" in
         -u )
-            if [[ ! -f /usr/portage/profiles ]]; then
+            if [[ ! -f ${PORTDIR}/profiles ]]; then
                 emerge-webrsync -q
             fi
-            install_gentoo_packages -uDNv --with-bdeps=y --backtrack=99 --jobs=2 @world
+            install_gentoo_packages --update --deep --newuse --complete-graph=y @world
             install_gentoo_packages --verbose=n --depclean
-            install_gentoo_packages -v --usepkg=n @preserved-rebuild
+            install_gentoo_packages --usepkg=n @preserved-rebuild
             etc-update --automode -5
             eselect news read new
             exit 0;
@@ -140,12 +118,12 @@ if [[ -z "${PKGS}" ]]; then
     echo "Not running install-packages ${ACTION} with empty packages list"
 else
     if [[ "${ACTION}" == 'install' ]]; then
-        if [[ ! -f /usr/portage/profiles ]]; then
+        if [[ ! -f ${PORTDIR}/profiles ]]; then
             emerge-webrsync -q
         fi
         install_gentoo_packages -q --jobs=2 --changed-use "${PKGS}"
     elif [[ "${ACTION}" == 'remove' ]]; then
-        if [[ ! -f /usr/portage/profiles ]]; then
+        if [[ ! -f ${PORTDIR}/profiles ]]; then
             emerge-webrsync -q
         fi
         install_gentoo_packages -C "${PKGS}"

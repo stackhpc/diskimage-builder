@@ -125,13 +125,13 @@ function get_repos_for_element(){
                 fi
 
                 if [ "$REPOREF" != "*" ] ; then
-                    HAS_REF=$(git --git-dir=$CACHE_PATH/.git name-rev $REPOREF 2>/dev/null || true)
+                    HAS_REF=$(git -C ${CACHE_PATH} name-rev $REPOREF 2>/dev/null || true)
                 fi
                 if [ -z "$DIB_OFFLINE" -o -z "${HAS_REF:-}" ] ; then
                     echo "Updating cache of $REPOLOCATION in $CACHE_PATH with ref $REPOREF"
                     # Copy named refs (which might be outside the usual heads
                     # pattern) - e.g. gerrit
-                    if [ "$REPOREF" == "*" ] || ! git --git-dir=$CACHE_PATH/.git fetch -q --prune --update-head-ok $REPOLOCATION \
+                    if [ "$REPOREF" == "*" ] || ! git -C ${CACHE_PATH} fetch -q --prune --update-head-ok $REPOLOCATION \
                             +${REPOREF}:${REPOREF} ; then
                         # Copy all heads from the remote repository - this permits
                         # using a SHA1 object reference so long as the object
@@ -139,12 +139,12 @@ function get_repos_for_element(){
                         # not permit arbitrary sha fetching from remote servers.
                         # This is a separate fetch to the prior one as the prior
                         # one will fail when REPOREF is a SHA1.
-                        git --git-dir=$CACHE_PATH/.git fetch -q --prune --update-head-ok $REPOLOCATION \
+                        git -C ${CACHE_PATH} fetch -q --prune --update-head-ok $REPOLOCATION \
                             +refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*
                     fi
                     # Ensure that we have a reference to the revision.
                     if [ "$REPOREF" != "*" ] ; then
-                        if ! git --git-dir=$CACHE_PATH/.git rev-parse -q --verify $REPOREF^{commit} > /dev/null; then
+                        if ! git -C ${CACHE_PATH} rev-parse -q --verify $REPOREF^{commit} > /dev/null; then
                             echo "Failed to find reference to $REPOREF"
                             exit 1
                         fi
@@ -154,35 +154,31 @@ function get_repos_for_element(){
                 echo "Cloning from $REPONAME cache and applying ref $REPOREF"
                 # If the local dir is already used, see if the pertinent details differ
                 if [[ -d $REPO_DEST ]]; then
-                    DESIRED="$(sudo git --git-dir=$REPO_DEST/.git config remote.origin.url)"
+                    DESIRED="$(sudo git -C ${REPO_DEST} config remote.origin.url)"
                     if [[ "$CACHE_PATH" != "$DESIRED" ]]; then
                         echo "REPOLOCATIONS don't match ("$CACHE_PATH" != "$DESIRED")" >&2
                         exit 1
                     elif [[ "$REPOREF" != "*" ]]; then
-                        pushd $REPO_DEST > /dev/null
                         # When we first clone we create a branch naming what we fetched
                         # that must match, or we are asking for two different references from the
                         # same repo, which is an error
-                        if ! git rev-parse fetch_$REPOREF; then
+                        if ! sudo git -C ${REPO_DEST} rev-parse fetch_$REPOREF; then
                             echo "REPOREFS don't match - failed to get sha1 of fetch_$REPOREF" >&2
                             exit 1
                         fi
-                        popd > /dev/null
                     fi
                 else
                     sudo git clone -q $CACHE_PATH $REPO_DEST
-                    pushd $REPO_DEST > /dev/null
                     if [[ "$REPOREF" == "*" ]]; then
-                        sudo git fetch -q --prune --update-head-ok $CACHE_PATH \
+                        sudo git -C ${REPO_DEST} fetch -q --prune --update-head-ok $CACHE_PATH \
                             +refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*
-                        git_sha=$(git rev-parse HEAD)
+                        git_sha=$(sudo git -C ${REPO_DEST} rev-parse HEAD)
                     else
-                        sudo git fetch -q $CACHE_PATH $REPOREF:fetch_$REPOREF
-                        sudo git reset --hard FETCH_HEAD
+                        sudo git -C ${REPO_DEST} fetch -q $CACHE_PATH $REPOREF:fetch_$REPOREF
+                        sudo git -C ${REPO_DEST} reset --hard FETCH_HEAD
                         # Get the sha in use
-                        git_sha=$(git rev-parse FETCH_HEAD)
+                        git_sha=$(sudo git -C ${REPO_DEST} rev-parse FETCH_HEAD)
                     fi
-                    popd > /dev/null
 
                     # Write the sha being used into the source-repositories manifest
                     echo "$REPONAME git $REPOPATH $REPOLOCATION $git_sha" >> $GIT_MANIFEST
@@ -201,7 +197,7 @@ function get_repos_for_element(){
                     tar -C $tmpdir -xzf $CACHE_PATH
                 else
                     echo "Fetching $REPONAME tarball from $REPOLOCATION"
-                    curl $REPOLOCATION | tar -C $tmpdir -xzf -
+                    curl -f $REPOLOCATION | tar -C $tmpdir -xzf -
                 fi
 
                 sudo mkdir -p $REPO_DEST
@@ -223,7 +219,7 @@ function get_repos_for_element(){
                     sudo cp $CACHE_PATH $REPO_DEST
                 else
                     echo "Fetching $REPONAME file from $REPOLOCATION"
-                    sudo curl $REPOLOCATION -o $REPO_DEST
+                    sudo curl -f $REPOLOCATION -o $REPO_DEST
                 fi
                 ;;
             *)

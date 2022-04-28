@@ -11,8 +11,11 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+
 import logging
+import os
 import random
+
 from struct import pack
 
 
@@ -67,6 +70,7 @@ class MBR(object):
 
     Primary partitions are created first - and must also be passed in
     first.
+
     The extended partition layout is done in the way, that there is
     one entry in the MBR (the last) that uses the whole disk.
     EBR (extended boot records) are used to describe the partitions
@@ -74,24 +78,32 @@ class MBR(object):
     be used for all partitions and arbitrarily many partitions can be
     created in the same way (the EBR is placed as block 0 in each
     partition itself).
+
     In conjunction with a fixed and 'fits all' partition alignment the
     major design focus is maximum performance for the installed image
     (vs. minimal size).
+
     Because of the chosen default alignment of 1MiB there will be
     (1MiB - 512B) unused disk space for the MBR and also the same
     size unused in every partition.
+
     Assuming that 512 byte blocks are used, the resulting layout for
     extended partitions looks like (blocks offset in extended
     partition given):
-           0: MBR - 2047 blocks unused
-        2048: EBR for partition 1 - 2047 blocks unused
-        4096: Start of data for partition 1
-         ...
-           X: EBR for partition N - 2047 blocks unused
-      X+2048: Start of data for partition N
+
+    ======== ==============================================
+    Offset    Description
+    ======== ==============================================
+        0     MBR - 2047 blocks unused
+     2048     EBR for partition 1 - 2047 blocks unused
+     4096     Start of data for partition 1
+     ...     ...
+      X       EBR for partition N - 2047 blocks unused
+      X+2048  Start of data for partition N
+    ======== ==============================================
 
     Direct (native) writing of MBR, EBR (partition table) is
-    implemented - no other parititoning library or tools is used -
+    implemented - no other partitioning library or tools is used -
     to be sure to get the correct CHS and alignment for a wide range
     of host systems.
     """
@@ -162,6 +174,8 @@ class MBR(object):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.image_fd.flush()
+        os.fsync(self.image_fd.fileno())
         self.image_fd.close()
 
     def lba2chs(self, lba):
@@ -179,8 +193,8 @@ class MBR(object):
         head = (lba // MBR.sectors_per_track) % MBR.heads_per_cylinder
         sector = (lba % MBR.sectors_per_track) + 1
 
-        logger.debug("Convert LBA to CHS [%d] -> [%d, %d, %d]"
-                     % (lba, cylinder, head, sector))
+        logger.debug("Convert LBA to CHS [%d] -> [%d, %d, %d]",
+                     lba, cylinder, head, sector)
         return cylinder, head, sector
 
     def encode_chs(self, cylinders, heads, sectors):
@@ -201,8 +215,8 @@ class MBR(object):
         es = es | hc          # pass them into the top two bits of the sector
 
         logger.debug("Encode CHS to disk format [%d %d %d] "
-                     "-> [%02x %02x %02x]" % (cylinders, heads, sectors,
-                                              eh, es, ec))
+                     "-> [%02x %02x %02x]", cylinders, heads, sectors,
+                     eh, es, ec)
         return eh, es, ec
 
     def write_mbr(self):
@@ -229,14 +243,14 @@ class MBR(object):
 
     def write_partition_entry(self, bootflag, blockno, entry, ptype,
                               lba_start, lba_length):
-        """Writes a parititon entry
+        """Writes a partition entry
 
         The entries are always the same and contain 16 bytes. The MBR
         and also the EBR use the same format.
         """
         logger.info("Write partition entry blockno [%d] entry [%d] "
-                    "start [%d] length [%d]" % (blockno, entry,
-                                                lba_start, lba_length))
+                    "start [%d] length [%d]", blockno, entry,
+                    lba_start, lba_length)
 
         self.image_fd.seek(
             blockno * MBR.bytes_per_sector +
@@ -279,9 +293,9 @@ class MBR(object):
         lba_abs_partition_end \
             = self.align(lba_partition_abs_start + lba_partition_length)
         logger.info("Partition absolute [%d] relative [%d] "
-                    "length [%d] absolute end [%d]"
-                    % (lba_partition_abs_start, lba_partition_rel_start,
-                       lba_partition_length, lba_abs_partition_end))
+                    "length [%d] absolute end [%d]",
+                    lba_partition_abs_start, lba_partition_rel_start,
+                    lba_partition_length, lba_abs_partition_end)
         return lba_partition_abs_start, lba_partition_length, \
             lba_abs_partition_end
 
@@ -294,14 +308,14 @@ class MBR(object):
             self.align(lba_partition_abs_start), lba_partition_length)
 
         self.partition_abs_next_free = lba_abs_partition_end
-        logger.debug("Next free [%d]" % self.partition_abs_next_free)
+        logger.debug("Next free [%d]", self.partition_abs_next_free)
         self.primary_partitions_created += 1
         self.partition_number += 1
         return self.partition_number
 
     def add_extended_partition(self, bootflag, size, ptype):
         lba_ebr_abs = self.partition_abs_next_free
-        logger.info("EBR block absolute [%d]" % lba_ebr_abs)
+        logger.info("EBR block absolute [%d]", lba_ebr_abs)
 
         _, lba_partition_length, lba_abs_partition_end \
             = self.compute_partition_lbas(lba_ebr_abs + 1, size)
@@ -321,7 +335,7 @@ class MBR(object):
         self.write_mbr_signature(lba_ebr_abs)
 
         self.partition_abs_next_free = lba_abs_partition_end
-        logger.debug("Next free [%d]" % self.partition_abs_next_free)
+        logger.debug("Next free [%d]", self.partition_abs_next_free)
         self.disk_block_last_ref = lba_ebr_abs
         self.extended_partitions_created += 1
         self.partition_number += 1
@@ -330,8 +344,8 @@ class MBR(object):
     def add_partition(self, primaryflag, bootflag, size, ptype):
         """Adds a partition with the given type and size"""
         logger.debug("Add new partition primary [%s] boot [%s] "
-                     "size [%d] type [%x]" %
-                     (primaryflag, bootflag, size, ptype))
+                     "size [%d] type [%x]",
+                     primaryflag, bootflag, size, ptype)
 
         # primaries must be created before extended
         if primaryflag and self.extended_partitions_created > 0:

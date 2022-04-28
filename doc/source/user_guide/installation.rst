@@ -1,18 +1,10 @@
 Installation
 ============
 
-If your distribution does not proivde packages, you should install
+If your distribution does not provide packages, you should install
 ``diskimage-builder`` via ``pip``, mostly likely in a ``virtualenv``
-to keep it separate.
-
-For example, to create a ``virtualenv`` and install from ``pip``
-
-::
-
-   virtualenv ~/dib-virtualenv
-   . ~/dib-virtualenv/bin/activate
-   pip install diskimage-builder
-
+to keep it separate.  For details, see the installation section in the
+:ref:`dev_install`.
 
 Once installed, you will be able to :doc:`build images
 <building_an_image>` using ``disk-image-create`` and the elements
@@ -25,6 +17,9 @@ Requirements
 Most image formats require the ``qemu-img`` tool which is provided by
 the ``qemu-utils`` package on Ubuntu/Debian or the ``qemu`` package on
 Fedora/RHEL/opensuse/Gentoo.
+
+When generating images with partitions, the ``kpartx`` tool is needed,
+which is provided by the ``kpartx`` package.
 
 Some image formats, such as ``VHD``, may require additional
 tools. Please see the ``disk-image-create`` help output for more

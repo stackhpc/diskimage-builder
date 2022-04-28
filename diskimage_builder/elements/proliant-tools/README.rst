@@ -1,12 +1,12 @@
 proliant-tools
 ==============
 
-* This element can be used when building ironic-agent ramdisk.  It
-  enables ironic-agent ramdisk to do in-band cleaning operations specific
-  to HPE ProLiant hardware.
+* This element can be used when building ironic-python-agent ramdisk.  It
+  enables ironic-python-agent ramdisk to do in-band cleaning operations
+  specific to HPE ProLiant hardware.
 
-* Works with ubuntu and fedora distributions (on which ironic-agent
-  element is supported).
+* Works with ubuntu and fedora distributions (on which the
+  ironic-python-agent-ramdisk element is supported).
 
 * Currently the following utilities are installed:
 
@@ -29,6 +29,6 @@ proliant-tools
     in the above link.  This utility is closed source and is released with
     `HPE End User License Agreement – Enterprise Version`_.
 
-.. _`proliantutils`: https://pypi.python.org/pypi/proliantutils
-.. _`HPE Smart Storage Administrator (HPE SSA) CLI for Linux 64-bit`: http://h20564.www2.hpe.com/hpsc/swd/public/detail?swItemId=MTX_3d16386b418a443388c18da82f&swEnvOid=4181
+.. _`proliantutils`: https://pypi.org/project/proliantutils
+.. _`HPE Smart Storage Administrator (HPE SSA) CLI for Linux 64-bit`: http://h20564.www2.hpe.com/hpsc/swd/public/detail?swItemId=MTX_5530b3f5b38b4e0781e6bf9c74
 .. _`HPE End User License Agreement – Enterprise Version`: https://downloads.hpe.com/pub/softlib2/software1/doc/p1796552785/v113125/eula-en.html

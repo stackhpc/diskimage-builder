@@ -6,9 +6,9 @@ fi
 set -eu
 set -o pipefail
 
-if [[ ${DISTRO_NAME} =~ "centos" ]]; then
+if [[ (${DISTRO_NAME} =~ "centos" || ${DISTRO_NAME} =~ "rocky") ]]; then
     # Centos has "epel-release" in extras, which is default enabled.
-    yum install -y epel-release
+    ${YUM} install -y epel-release
 else
     # For RHEL, we have to scrape the download page to find the latest
     # release and install that
@@ -21,15 +21,12 @@ else
     case "$DISTRO_NAME" in
         rhel7)
             RELEASE=7
-            URL=$BASE_URL/$RELEASE/x86_64/e/
-            ;;
-        rhel)
-            RELEASE=6
-            URL=$BASE_URL/$RELEASE/$ARCH/
+            URL=$BASE_URL/$RELEASE/x86_64/Packages/e/
             ;;
         *)
             echo "$DISTRO_NAME is not supported"
-            exit 1
+            # Not really a failure; we just don't do anything
+            exit 0
             ;;
     esac
     PKG_NAME=$(wget -q $URL -O - |grep -oE "(href=\"epel-release-$RELEASE-[0-9,.].*)" | cut -d'"' -f2)
@@ -37,11 +34,19 @@ else
 fi
 
 if [ ${DIB_EPEL_DISABLED:-0} -ne 0 ]; then
-    yum-config-manager --disable epel
+    if [[ ${YUM} == "dnf" ]]; then
+        rpm  -q dnf-plugins-core || dnf install -y dnf-plugins-core
+        dnf config-manager --set-disabled "epel*"
+    else
+        # Cannot rely on package-installs, it is executed later
+        rpm  -q yum-utils || yum install -y yum-utils
+        yum-config-manager --disable "epel*"
+    fi
 fi
 
 DIB_EPEL_MIRROR=${DIB_EPEL_MIRROR:-}
 [ -n "$DIB_EPEL_MIRROR" ] || exit 0
 
 # Set the EPEL mirror to use
-sed -e "s|^#baseurl=http://download.fedoraproject.org/pub/epel|baseurl=$DIB_EPEL_MIRROR|;/^mirrorlist=/d" -i /etc/yum.repos.d/epel.repo
+sed -e "s|^#baseurl=http[s]*://.*/pub/epel|baseurl=$DIB_EPEL_MIRROR|;/^mirrorlist=/d;/^metalink=/d" -i /etc/yum.repos.d/epel.repo
+

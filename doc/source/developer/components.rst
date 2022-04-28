@@ -1,7 +1,7 @@
 Components
 ==========
 
-`disk-image-create [-a i386|amd64|armhf|arm64] -o filename {element} [{element} ...]`
+`disk-image-create [-a amd64|armhf|arm64] -o filename {element} [{element} ...]`
 
     Create an image of element {element}, optionally mixing in other elements.
     Element dependencies are automatically included. Support for other
@@ -22,9 +22,7 @@ Components
 
         ramdisk-image-create -o deploy.ramdisk deploy-baremetal
 
-    To generate kernel+ramdisk pair for use with ironic, use::
-
-        ramdisk-image-create -o deploy.ramdisk ironic-agent
+    Ironic no longer supports images created like this.
 
 
 `element-info`

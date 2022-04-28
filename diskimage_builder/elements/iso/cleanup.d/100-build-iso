@@ -29,9 +29,15 @@ function build_efiboot_img() {
     # Ubuntu: grub-efi-amd64-signed and shim-signed
     # Fedora: grub2-efi and shim
 
-    if [ $DISTRO_NAME = "fedora" ]; then
+    if [[ $DISTRO_NAME = "fedora" || $DISTRO_NAME = "rhel7" ]] ; then
         cp $TMP_BOOTLOADER_DIR/shim.efi $TMP_BUILD_DIR/bootx64.efi
         cp $TMP_BOOTLOADER_DIR/grubx64.efi $TMP_BUILD_DIR/grubx64.efi
+    elif [[ $DISTRO_NAME = "centos" ]] ; then
+        cp $TMP_BOOTLOADER_DIR/shimx64-centos.efi $TMP_BUILD_DIR/bootx64.efi
+        cp $TMP_BOOTLOADER_DIR/grubx64.efi $TMP_BUILD_DIR/grubx64.efi
+    elif [[ $DISTRO_NAME = "ubuntu" || $DISTRO_NAME = "debian" ]] ; then
+        cp $TMP_BOOTLOADER_DIR/shimx64.efi.signed $TMP_BUILD_DIR/bootx64.efi
+        cp $TMP_BOOTLOADER_DIR/grubx64.efi.signed $TMP_BUILD_DIR/grubx64.efi
     else
         cp $TMP_BOOTLOADER_DIR/shim.efi.signed $TMP_BUILD_DIR/bootx64.efi
         cp $TMP_BOOTLOADER_DIR/grubx64.efi.signed $TMP_BUILD_DIR/grubx64.efi
@@ -63,19 +69,20 @@ function build_iso() {
     SCRIPTDIR=$(dirname $0)
     MKISOFS="/usr/bin/mkisofs"
     if [ $DISTRO_NAME = "fedora" ]; then
-        EFI_BOOT_DIR="EFI/fedora"
         EXTRA_KERNEL_PARAMS="usbcore.autosuspend=-1"
+    #centos
+    elif [ $DISTRO_NAME = "centos" ]; then
+        EFI_BOOT_DIR="EFI/centos"
+        EXTRA_KERNEL_PARAMS=""
     #debian
     elif [ $DISTRO_NAME = "debian" ]; then
-        EFI_BOOT_DIR="EFI/debian"
         EXTRA_KERNEL_PARAMS=""
     #ubuntu:
     else
-        EFI_BOOT_DIR="EFI/ubuntu"
         EXTRA_KERNEL_PARAMS=""
     fi
 
-    # Create a temporary build directory for holiding the contents of iso
+    # Create a temporary build directory for holding the contents of iso
     TMP_IMAGE_DIR="$TMP_BUILD_DIR/image"
     echo "Creating temporary directory $TMP_IMAGE_DIR"
     mkdir -p "$TMP_IMAGE_DIR"
@@ -152,7 +159,7 @@ if echo $IMAGE_ELEMENT | grep -q '\bramdisk\b'; then
     DIB_DEPLOY_ISO_KERNEL_CMDLINE_ARGS=${DIB_DEPLOY_ISO_KERNEL_CMDLINE_ARGS:-}
     EMITTED_KERNEL_CMDLINE_ARGS="boot_method=vmedia $DIB_DEPLOY_ISO_KERNEL_CMDLINE_ARGS"
     EMITTED_ISO_FILENAME=$IMAGE_NAME.iso
-elif echo $IMAGE_ELEMENT | grep -q '\bironic-agent\b'; then
+elif echo $IMAGE_ELEMENT | grep -q '\bironic-python-agent\b'; then
     EMITTED_KERNEL=$IMAGE_NAME.vmlinuz
     EMITTED_RAMDISK=$IMAGE_NAME.initramfs
     DIB_DEPLOY_ISO_KERNEL_CMDLINE_ARGS=${DIB_DEPLOY_ISO_KERNEL_CMDLINE_ARGS:-}
@@ -178,4 +185,3 @@ build_iso "$EMITTED_KERNEL" "$EMITTED_RAMDISK" "$EMITTED_KERNEL_CMDLINE_ARGS" \
 
 # Clean-up the bootloaders directory
 sudo rm -fr $TMP_BOOTLOADER_DIR
-

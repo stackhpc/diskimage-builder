@@ -1,7 +1,7 @@
 {
   "release": {
-    "ubuntu": {
-      "precise": {
+    "debian": {
+      "bullseye": {
         "cloud-initramfs-growroot": "cloud-initramfs-growroot"
        }
      }

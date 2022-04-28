@@ -26,7 +26,7 @@ export LC_ALL=C
 
 # Store our initial environment and command line args for later
 export DIB_ARGS="$@"
-export DIB_ENV=$(export | grep ' DIB_.*=')
+export DIB_ENV=$(declare -p $(compgen -v | grep '^DIB_'))
 
 SCRIPTNAME=$(basename $0)
 
@@ -41,6 +41,8 @@ diskimage_builder.paths.show_path("elements")')
 
 source $_LIB/die
 
+DIB_BLOCK_DEVICE="${DIB_PYTHON_EXEC} ${_LIB}/dib-block-device.py"
+
 IS_RAMDISK=0
 if [ "$SCRIPTNAME" == "ramdisk-image-create" ]; then
   IS_RAMDISK=1
@@ -50,7 +52,7 @@ function show_options () {
     echo "Usage: ${SCRIPTNAME} [OPTION]... [ELEMENT]..."
     echo
     echo "Options:"
-    echo "    -a i386|amd64|armhf|arm64 -- set the architecture of the image(default amd64)"
+    echo "    -a amd64|armhf|arm64 -- set the architecture of the image(default amd64)"
     echo "    -o imagename -- set the imagename of the output image file(default image)"
     echo "    -t qcow2,tar,tgz,squashfs,vhd,docker,aci,raw -- set the image types of the output image files (default qcow2)"
     echo "       File types should be comma separated. VHD outputting requires the vhd-util"
@@ -59,8 +61,10 @@ function show_options () {
     echo "    -x -- turn on tracing (use -x -x for very detailed tracing)."
     echo "    -u -- uncompressed; do not compress the image - larger but faster"
     echo "    -c -- clear environment before starting work"
+    echo "    --logfile -- save run output to given logfile (implies DIB_QUIET=1)"
     echo "    --checksum -- generate MD5 and SHA256 checksum files for the created image"
     echo "    --image-size size -- image size in GB for the created image"
+    echo "    --image-extra-size size -- extra image size in GB for the created image"
     echo "    --image-cache directory -- location for cached images(default ~/.cache/image-create)"
     echo "    --max-online-resize size -- max number of filesystem blocks to support when resizing."
     echo "       Useful if you want a really large root partition when the image is deployed."
@@ -69,6 +73,7 @@ function show_options () {
     echo "       Making this value unnecessarily large will consume extra disk space "
     echo "       on the root partition with extra file system inodes."
     echo "    --min-tmpfs size -- minimum size in GB needed in tmpfs to build the image"
+    echo "    --mkfs-journal-size -- filesystem journal size in MB to pass to mkfs."
     echo "    --mkfs-options -- option flags to be passed directly to mkfs."
     echo "       Options should be passed as a single string value."
     echo "    --no-tmpfs -- do not use tmpfs to speed image build"
@@ -83,12 +88,17 @@ function show_options () {
     echo "    --docker-target -- specify the repo and tag to use if the output type is docker. Defaults to the value of output imagename"
     if [ "$IS_RAMDISK" == "0" ]; then
         echo "    -n skip the default inclusion of the 'base' element"
-        echo "    -p package[,p2...] [-p p3] -- extra packages to install in the image.  Runs once, after 'install.d' phase.  Can be specified mulitple times"
+        echo "    -p package[,p2...] [-p p3] -- extra packages to install in the image.  Runs once, after 'install.d' phase.  Can be specified multiple times"
     fi
     echo "    -h|--help -- display this help and exit"
     echo "    --version -- display version and exit"
     echo
-    echo "ELEMENTS_PATH will allow you to specify multiple locations for the elements."
+    echo "Environment Variables:"
+    echo "  (this is not a complete list)"
+    echo
+    echo "  * ELEMENTS_PATH: specify external locations for the elements.  As for \$PATH"
+    echo "  * DIB_NO_TIMESTAMP: no timestamp prefix on output.  Useful if capturing output"
+    echo "  * DIB_QUIET: 1=do not output log output to stdout; 0=always ouptut to stdout.  See --logfile"
     echo
     echo "NOTE: At least one distribution root element must be specified."
     echo
@@ -115,12 +125,14 @@ DIB_DEBUG_TRACE=${DIB_DEBUG_TRACE:-0}
 INSTALL_PACKAGES=""
 IMAGE_TYPES=("qcow2")
 COMPRESS_IMAGE="true"
-export DIB_ROOT_LABEL=""
+DIB_GZIP_BIN=${DIB_GZIP_BIN:-"gzip"}
+ROOT_LABEL=""
 DIB_DEFAULT_INSTALLTYPE=${DIB_DEFAULT_INSTALLTYPE:-"source"}
 MKFS_OPTS=""
 ACI_MANIFEST=${ACI_MANIFEST:-}
 DOCKER_TARGET=""
-TEMP=`getopt -o a:ho:t:xucnp: -l checksum,no-tmpfs,offline,help,version,min-tmpfs:,image-size:,image-cache:,max-online-resize:,mkfs-options:,qemu-img-options:,ramdisk-element:,root-label:,install-type:,docker-target: -n $SCRIPTNAME -- "$@"`
+LOGFILE=""
+TEMP=`getopt -o a:ho:t:xucnp: -l checksum,no-tmpfs,offline,help,version,min-tmpfs:,image-size:,image-cache:,max-online-resize:,mkfs-options:,qemu-img-options:,ramdisk-element:,root-label:,install-type:,docker-target:,logfile: -n $SCRIPTNAME -- "$@"`
 if [ $? -ne 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
 
 # Note the quotes around `$TEMP': they are essential!
@@ -140,17 +152,20 @@ while true ; do
         -p) IFS="," read -a _INSTALL_PACKAGES <<< "$2"; export INSTALL_PACKAGES=( ${INSTALL_PACKAGES[@]} ${_INSTALL_PACKAGES[@]} ) ; shift 2 ;;
         --checksum) shift; export DIB_CHECKSUM=1;;
         --image-size) export DIB_IMAGE_SIZE=$2; shift 2;;
+        --image-extra-size) export DIB_IMAGE_EXTRA_SIZE=$2; shift 2;;
         --image-cache) export DIB_IMAGE_CACHE=$2; shift 2;;
         --max-online-resize) export MAX_ONLINE_RESIZE=$2; shift 2;;
+        --mkfs-journal-size) export DIB_JOURNAL_SIZE=$2; shift 2;;
         --mkfs-options) MKFS_OPTS=$2; shift 2;;
         --min-tmpfs) export DIB_MIN_TMPFS=$2; shift 2;;
         --no-tmpfs) shift; export DIB_NO_TMPFS=1;;
         --offline) shift; export DIB_OFFLINE=1;;
         --qemu-img-options) QEMU_IMG_OPTIONS=$2; shift 2;;
-        --root-label) export DIB_ROOT_LABEL=$2; shift 2;;
+        --root-label) ROOT_LABEL=$2; shift 2;;
         --ramdisk-element) RAMDISK_ELEMENT=$2; shift 2;;
         --install-type) DIB_DEFAULT_INSTALLTYPE=$2; shift 2;;
         --docker-target) export DOCKER_TARGET=$2; shift 2 ;;
+        --logfile) export LOGFILE=$2; shift 2 ;;
         --) shift ; break ;;
         *) echo "Internal error!" ; exit 1 ;;
     esac
@@ -158,8 +173,15 @@ done
 
 export DIB_DEBUG_TRACE
 
+# TODO: namespace this under ~/.cache/dib/ for consistency
 export DIB_IMAGE_CACHE=${DIB_IMAGE_CACHE:-~/.cache/image-create}
 mkdir -p $DIB_IMAGE_CACHE
+
+# We have a couple of critical sections (touching parts of the host
+# system or download images to common cache) that we use flock around.
+# Use this directory for lockfiles.
+export DIB_LOCKFILES=${DIB_LOCKFILES:-~/.cache/dib/lockfiles}
+mkdir -p $DIB_LOCKFILES
 
 if [ "$CLEAR_ENV" = "1" -a "$HOME" != "" ]; then
   echo "Re-execing to clear environment."
@@ -167,11 +189,42 @@ if [ "$CLEAR_ENV" = "1" -a "$HOME" != "" ]; then
   exec -c $0 "$@"
 fi
 
+# We send stdout & stderr through "outfilter" which does timestamping,
+# basic filtering and log file output.
+_TS_FLAG=""
+if [[ "${DIB_NO_TIMESTAMP:-0}" -eq 1 ]]; then
+    _TS_FLAG="--no-timestamp"
+fi
+# A logfile with *no* DIB_QUIET specified implies we just want output
+# to the logfile.  Explicitly setting DIB_QUIET=0 will overide this
+# and log both.
+if [[ -n "${LOGFILE}" && -z "${DIB_QUIET}" ]]; then
+    DIB_QUIET=1
+fi
+_QUIET_FLAG="-v"
+if [[ "${DIB_QUIET:-0}" -eq 1 ]]; then
+    _QUIET_FLAG=""
+fi
+_LOGFILE_FLAG=""
+if [[ -n "${LOGFILE}" ]]; then
+    echo "Output logs going to: ${LOGFILE}"
+    _LOGFILE_FLAG="-o ${LOGFILE}"
+fi
+
+# Save the existing stdout to fd3
+exec 3>&1
+
+exec 1> >( ${DIB_PYTHON_EXEC:-python} $_LIB/outfilter.py ${_TS_FLAG} ${_QUIET_FLAG} ${_LOGFILE_FLAG} ) 2>&1
+
 
 # Display the current file/function/line in the debug output
 function _ps4 {
     IFS=" " called=($(caller 0))
     local f=$(readlink -f ${called[2]})
+    # As we're being run out of the python package's lib/ dir (either
+    # virtualenv or system), we can strip everything before
+    # "site-packages" to significantly shorten the line without really
+    f=${f##*site-packages/}
     printf "%-80s " "$f:${called[1]}:${called[0]}"
 }
 export -f _ps4
@@ -208,7 +261,7 @@ fi
 for X in ${!IMAGE_TYPES[@]}; do
     case "${IMAGE_TYPES[$X]}" in
         qcow2)
-            if [ -z "$(which qemu-img)" ]; then
+            if ! type qemu-img > /dev/null 2>&1; then
                 echo "qcow2 output format specified but qemu-img executable not found."
                 exit 1
             fi
@@ -218,19 +271,19 @@ for X in ${!IMAGE_TYPES[@]}; do
             IMAGE_TYPES+=('tar')
             ;;
         vhd)
-            if [ -z "$(which vhd-util)" ]; then
+            if ! type vhd-util > /dev/null 2>&1; then
                 echo "vhd output format specified but no vhd-util executable found."
                 exit 1
             fi
             ;;
         squashfs)
-            if [ -z "$(which mksquashfs)" ]; then
+            if ! type mksquashfs > /dev/null 2>&1; then
                 echo "squashfs output format specified but no mksquashfs executable found."
                 exit 1
             fi
             ;;
         docker)
-            if [ -z "$(which docker)" ]; then
+            if ! type docker > /dev/null 2>&1; then
                 echo "docker output format specified but no docker executable found."
                 exit 1
             fi
@@ -244,30 +297,10 @@ done
 
 # NOTE: fstrim is on most all recent systems. It is provided by the util-linux
 # package.
-if [[ -z "$(which fstrim)" ]]; then
+if ! type fstrim > /dev/null 2>&1; then
     echo "fstrim utility is not found. This is provided by util-linux package"
     echo "Please check your PATH variable is set correctly"
     exit 1
-fi
-
-# NOTE: Tuning the rootfs uuid works only for ext filesystems.
-# Rely on the below environment variable only for ext filesystems.
-export DIB_IMAGE_ROOT_FS_UUID=$(uuidgen -r)
-if echo "$FS_TYPE" | grep -q "^ext" && [ -z "${DIB_IMAGE_ROOT_FS_UUID}" ]; then
-    echo "ext filesystem detected but no DIB_IMAGE_ROOT_FS_UUID found."
-    echo "Is the uuidgen utility installed on your system?"
-    exit 1
-fi
-
-# FS_TYPE isn't available until after we source img-defaults
-if [ -z "$DIB_ROOT_LABEL" ]; then
-    # NOTE(bnemec): XFS has a limit of 12 characters for filesystem labels
-    # Not changing the default for other filesystems to maintain backwards compatibility
-    if [ "$FS_TYPE" = "xfs" ]; then
-        DIB_ROOT_LABEL="img-rootfs"
-    else
-        DIB_ROOT_LABEL="cloudimg-rootfs"
-    fi
 fi
 
 # xattr support cannot be relied upon with tmpfs builds
@@ -294,13 +327,25 @@ cat >${DIB_BLOCK_DEVICE_PARAMS_YAML} <<EOF
 config: ${BLOCK_DEVICE_CONFIG_YAML}
 image-dir: ${TMP_IMAGE_DIR}
 root-fs-type: ${FS_TYPE}
-root-label: ${DIB_ROOT_LABEL}
+root-label: ${ROOT_LABEL}
 mount-base: ${TMP_BUILD_DIR}/mnt
 build-dir: ${TMP_BUILD_DIR}
 EOF
 
-dib-block-device --phase=init \
-                 --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}"
+${DIB_BLOCK_DEVICE} init
+
+# Need to get the real root label because it can be overwritten
+# by the BLOCK_DEVICE_CONFIG.
+DIB_ROOT_LABEL=$(${DIB_BLOCK_DEVICE} getval root-label)
+export DIB_ROOT_LABEL
+
+# Need to get the real fs type for the root filesystem
+DIB_ROOT_FSTYPE=$(${DIB_BLOCK_DEVICE} getval root-fstype)
+export DIB_ROOT_FSTYPE
+
+# retrieve mount points so we can reuse in elements
+DIB_MOUNTPOINTS=$(${DIB_BLOCK_DEVICE} getval mount-points)
+export DIB_MOUNTPOINTS
 
 create_base
 # This variable needs to be propagated into the chroot
@@ -313,6 +358,7 @@ run_d_in_target pre-install
 run_d_in_target install
 do_extra_package_install
 run_d_in_target post-install
+run_d post-root
 # ensure we do not have a lost+found directory in the root folder
 # that could cause copy to fail (it will be created again later
 # when creating the file system, if it needs such directory)
@@ -337,8 +383,15 @@ else
     echo "Calculating image size (this may take a minute)..."
     sudo du -a -c -x ${TMP_BUILD_DIR}/built > ${du_output}
     # the last line is the total size from "-c".
-    # scale this by 0.6 to create a slightly bigger image
-    du_size=$(tail -n1 ${du_output} | cut -f1 | awk '{print int($1 / 0.6)}')
+    if [ -n "$DIB_IMAGE_EXTRA_SIZE" ]; then
+        # add DIB_IMAGE_EXTRA_SIZE megabytes to create a bigger image as requested
+        du_extra_size=$(echo "$DIB_IMAGE_EXTRA_SIZE" | awk '{printf("%d\n",$1 * 1024)}')
+        du_size_tmp=$(tail -n1 ${du_output} | cut -f1)
+        du_size=$(echo "$du_size_tmp $du_extra_size" | awk '{print int($1 + $2)}')
+    else
+        # scale this by 0.6 to create a slightly bigger image
+        du_size=$(tail -n1 ${du_output} | cut -f1 | awk '{print int($1 / 0.6)}')
+    fi
     $xtrace
 fi
 
@@ -378,16 +431,52 @@ fi
 
 rm -f ${du_output}
 
-if [ "$FS_TYPE" = "ext4" ] ; then
+if [ -n "$DIB_JOURNAL_SIZE" ]; then
+    journal_size="$DIB_JOURNAL_SIZE"
+else
+    journal_size=64
+fi
+
+if [ "$DIB_ROOT_FSTYPE" = "ext4" ] ; then
   # Very conservative to handle images being resized a lot
   # We set journal size to 64M so our journal is large enough when we
   # perform an FS resize.
-  MKFS_OPTS="-i 4096 -J size=64 $MKFS_OPTS"
+  MKFS_OPTS="-i 4096 -J size=$journal_size $MKFS_OPTS"
+
+  # NOTE(ianw) 2019-12-11 : this is a terrible hack ... if building on
+  # >=Bionic hosts, mkfs sets "metadata_csum" for ext4 filesystems,
+  # which makes broken Trusty images as that era fsck doesn't
+  # understand this flag.  The image will stop in early boot
+  # complaining:
+  #
+  #  Serious errors were found while checking the disk drive for /.
+  #
+  # We do not really have any suitable hook points where one of the
+  # ubuntu elements or block-device-* could set this override flag for
+  # just Trusty.  We probably should, but desire to implement more
+  # code to support the out-of-date trusty at this point is
+  # non-existant.  So hack in disabling this here.
+  if [[ ${DIB_RELEASE} == "trusty" ]]; then
+      MKFS_OPTS="-O ^metadata_csum $MKFS_OPTS"
+  fi
+
   # Grow the image size to account for the journal, only if the user
   # has not asked for a specific size.
   if [ -z "$DIB_IMAGE_SIZE" ]; then
-    du_size=$(( $du_size + 65536 ))
+    du_size=$(( $du_size + ($journal_size * 1024) ))
   fi
+fi
+
+# EFI system partitions default to be quite large at 512mb for maximum
+# compatability (see notes in
+# 7fd52ba84180b4e749ccf4c9db8c49eafff46ea8) .  We need to increase the
+# total size to account for this, or we run out of space creating the
+# final image.  See if we have included the block-device-efi element,
+# which implies we have a large EFI partition, and then pad the final
+# image size.
+if [[ ${IMAGE_ELEMENT} =~ "block-device-efi" ]]; then
+    echo "Expanding disk for EFI partition"
+    du_size=$(( $du_size + (525 * 1024) ))
 fi
 
 # Rounding down size so that is is a multiple of 64, works around a bug in
@@ -404,57 +493,45 @@ export TMP_IMAGE_DIR
 # phase. If this gives no result, use the configuration based approach:
 eval_run_d block-device "IMAGE_BLOCK_DEVICE="
 
-# Because there is currently no generic way of passing in variables
-# from elements to the main, get here the well known config of a well
-# known element.
-# (This is only temporary and will go away when the complete block
-# device handling including file system handling and mounting is
-# implemented using python.)
-if [[ $IMAGE_ELEMENT =~ vm ]]; then
-    for EPATH in $(echo ${ELEMENTS_PATH} | tr ":" " "); do
-        PART_CFG_PATH=${EPATH}/vm/environment.d/10-partitioning
-        [ -e ${PART_CFG_PATH} ] && source ${PART_CFG_PATH}
-    done
-fi
-
 if [ -z ${IMAGE_BLOCK_DEVICE} ] ; then
     # For compatibily reasons in addition to the YAML configuration
     # there is the need to handle the old environment variables.
     echo "image-size: ${DIB_IMAGE_SIZE}KiB" >> ${DIB_BLOCK_DEVICE_PARAMS_YAML}
 
+    if [ -n "${MKFS_OPTS}" ] ; then
+        echo "root-fs-opts: '${MKFS_OPTS}'" >> ${DIB_BLOCK_DEVICE_PARAMS_YAML}
+    fi
+
     # After changeing the parameters, there is the need to
-    # re-run dib-block-device init because some value might
+    # re-run ${DIB_BLOCK_DEVICE} init because some value might
     # change based on the new set parameters.
-    dib-block-device --phase=init \
-                     --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}"
+    ${DIB_BLOCK_DEVICE} init
 
-    # values to dib-block-device: using the YAML config and
-    dib-block-device --phase=create \
-                     --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}"
+    # values to ${DIB_BLOCK_DEVICE}: using the YAML config and
+    ${DIB_BLOCK_DEVICE} create
 
-    # It's called 'DEVICE' but it's the partition.
-    IMAGE_BLOCK_DEVICE=$(dib-block-device \
-                             --phase=getval --symbol=image-block-partition \
-                             --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}")
+    # This is the device (/dev/loopX).  It's where to install the
+    # bootloader.
+    IMAGE_BLOCK_DEVICE=$(${DIB_BLOCK_DEVICE} getval image-block-device)
+    export IMAGE_BLOCK_DEVICE
+
+    # Similar to above, but all mounted devices.  This is handy for
+    # some bootloaders that have multi-partition layouts and want to
+    # copy things to different places other than just
+    # IMAGE_BLOCK_DEVICE.  "eval" this into an array as needed
+    IMAGE_BLOCK_DEVICES=$(${DIB_BLOCK_DEVICE} getval image-block-devices)
+    export IMAGE_BLOCK_DEVICES
+
+    # Write the fstab
+    ${DIB_BLOCK_DEVICE} writefstab
 fi
-export IMAGE_BLOCK_DEVICE
+
+# XXX: needed?
 LOOPDEV=${IMAGE_BLOCK_DEVICE}
 
-IMAGE_BLOCK_DEVICE_WITHOUT_PART=$(echo ${IMAGE_BLOCK_DEVICE} \
-              | sed -e "s|^\(.*loop[0-9]*\)p[0-9]*$|\1|g")
-export IMAGE_BLOCK_DEVICE_WITHOUT_PART
-
-export EXTRA_DETACH="detach_loopback ${IMAGE_BLOCK_DEVICE_WITHOUT_PART}"
-export EXTRA_UNMOUNT="dib-block-device --phase=cleanup \
-                      --params=\"${DIB_BLOCK_DEVICE_PARAMS_YAML}\""
-
-sudo mkfs -t $FS_TYPE $MKFS_OPTS -L ${DIB_ROOT_LABEL} ${IMAGE_BLOCK_DEVICE}
-# Tuning the rootfs uuid works only for ext filesystems.
-if echo "$FS_TYPE" | grep -q "^ext"; then
-    sudo tune2fs -U ${DIB_IMAGE_ROOT_FS_UUID} ${IMAGE_BLOCK_DEVICE}
-fi
-mkdir $TMP_BUILD_DIR/mnt
-sudo mount ${IMAGE_BLOCK_DEVICE} $TMP_BUILD_DIR/mnt
+# At this point, ${DIB_BLOCK_DEVICE} has created the raw image file
+# (IMAGE_BLOCK_DEVICE) and mounted all the partitions under
+# $TMP_BUILD_DIR/mnt for us.  We can now copy into the final image.
 
 # 'mv' is not usable here - especially when a top level directory
 # has the same name as a mount point of a partition.  If so, 'mv'
@@ -466,6 +543,7 @@ sudo cp -ra ${TMP_BUILD_DIR}/built/* $TMP_BUILD_DIR/mnt
 sudo rm -fr ${TMP_BUILD_DIR}/built/*
 
 mount_proc_dev_sys
+run_d pre-finalise
 run_d_in_target finalise
 finalise_base
 
@@ -500,24 +578,18 @@ for X in ${!IMAGE_TYPES[@]} ; do
   fi
 done
 
-if [[ ! $IMAGE_ELEMENT =~ no-final-image ]]; then
-  # Prep filesystem by discarding all unused space
-  fstrim_image
-fi
-
 # Unmount and cleanup the /mnt and /build subdirectories, to save
 # space before converting the image to some other format.
+# XXX ? needed?
 export EXTRA_UNMOUNT=""
 unmount_image
-TMP_IMAGE_PATH=$(dib-block-device --phase=getval --symbol=image-path \
-                                  --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}")
+
+TMP_IMAGE_PATH=$(${DIB_BLOCK_DEVICE} getval image-path)
 export TMP_IMAGE_PATH
 
-dib-block-device --phase=umount \
-                 --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}"
-
-dib-block-device --phase=cleanup \
-                 --params="${DIB_BLOCK_DEVICE_PARAMS_YAML}"
+# remove all mounts
+${DIB_BLOCK_DEVICE} umount
+${DIB_BLOCK_DEVICE} cleanup
 
 cleanup_build_dir
 
@@ -539,6 +611,19 @@ fi
 
 # Remove the leftovers, i.e. the temporary image directory.
 cleanup_image_dir
+
+# Restore fd 1&2 from the outfilter.py redirect back to the original
+# saved fd.  Note small hack that we can't really wait properly for
+# outfilter.py so put in a sleep (might be possible to use coproc for
+# this...?)
+#
+# TODO(ianw): probably better to cleanup the exit handler a bit for
+# this?  We really want some helper functions that append to the exit
+# handler so we can register multiple things.
+set +o xtrace
+echo "Build completed successfully"
+exec 1>&3 2>&3
+sleep 1
 
 # All done!
 trap EXIT

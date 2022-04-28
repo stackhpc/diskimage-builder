@@ -24,4 +24,14 @@ SCRIPTDIR=$(dirname $0)
 # Ensure the 8021q module is loaded so that glean can support tagged interfaces
 echo "8021q" >> /etc/modules
 
-glean-install
+enable_nm=""
+if [[ ${DIB_SIMPLE_INIT_NETWORKMANAGER} != 0 ]]; then
+    enable_nm="--use-nm"
+fi
+
+no_dhcp_fallback=""
+if [[ ${DIB_SIMPLE_INIT_NO_DHCP_FALLBACK:-0} != 0 ]]; then
+    no_dhcp_fallback="--no-dhcp-fallback"
+fi
+
+glean-install ${enable_nm} ${no_dhcp_fallback}
