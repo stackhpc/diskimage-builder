@@ -1,6 +1,13 @@
 #!/bin/bash
 
-if [ ${DIB_PREVENT_SOURCES_OVERWRITE:-} ] && [ ${DIB_PREVENT_SOURCES_OVERWRITE} = true ]; then
+if [[ ${DIB_DEBUG_TRACE:-0} -gt 1 ]]; then
+    set -x
+fi
+set -eu
+set -o pipefail
+
+if [[ -n "${DIB_PREVENT_SOURCES_OVERWRITE:-}"  && ${DIB_PREVENT_SOURCES_OVERWRITE:-} == true ]]; then
     # Prevent cloud-init from overwriting custom sources list
     sudo sh -c 'echo "apt_preserve_sources_list: true" > /etc/cloud/cloud.cfg.d/92-apt-preserve-source-list.cfg'
 fi
+
