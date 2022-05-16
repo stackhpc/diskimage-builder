@@ -9,6 +9,6 @@ set -o pipefail
 if [[ -n "${DIB_PREVENT_SOURCES_OVERWRITE:-}" ]]; then
     # Prevent cloud-init from overwriting custom sources list
     echo 'creating /etc/cloud/cloud.cfg.d/92-apt-preserve-source-list.cfg'
-    sudo sh -c 'echo "apt_preserve_sources_list: true" > /etc/cloud/cloud.cfg.d/92-apt-preserve-source-list.cfg'
+    echo "apt_preserve_sources_list: true" | tee /etc/cloud/cloud.cfg.d/92-apt-preserve-source-list.cfg
 fi
 
