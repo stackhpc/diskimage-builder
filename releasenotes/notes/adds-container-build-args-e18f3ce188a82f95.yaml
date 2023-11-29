@@ -1,0 +1,6 @@
+---
+features:
+  - |
+    Adds support for container build arguments using variables of the form
+    ``DIB_CONTAINERFILE_BUILD_ARG_<REF>``. See README.rst in containerfile
+    element for more details.

@@ -93,7 +93,19 @@ function podman_cleanup() {
 
 trap "podman_cleanup" EXIT
 
-${_sudo} ${DIB_CONTAINERFILE_RUNTIME} build ${DIB_CONTAINERFILE_RUNTIME_NETWORK} -t ${_podman_build_image} -f $DIB_CONTAINERFILE_DOCKERFILE $DIB_CONTAINER_CONTEXT
+BUILD_ARGS=()
+for ENV_VAR in $(compgen -v); do
+    if [[ "$ENV_VAR" =~ DIB_CONTAINERFILE_BUILD_ARG_(.*) ]]; then
+        VALUE=${!ENV_VAR:-}
+        if [[ ${VALUE:+x} == "" ]]; then
+            echo "*** $ENV_VAR has not been set!"
+            exit 1
+        fi
+        BUILD_ARGS+=( --build-arg "$VALUE")
+    fi
+done
+
+${_sudo} ${DIB_CONTAINERFILE_RUNTIME} build "${BUILD_ARGS[@]}" ${DIB_CONTAINERFILE_RUNTIME_NETWORK} -t ${_podman_build_image} -f $DIB_CONTAINERFILE_DOCKERFILE $DIB_CONTAINER_CONTEXT
 ${_sudo} ${DIB_CONTAINERFILE_RUNTIME} run ${DIB_CONTAINERFILE_RUNTIME_NETWORK} --name ${_podman_export_container} -d ${_podman_build_image} /bin/sh
 # NOTE(ianw) 2021-11-10 the tar must always be sudo to write out the chroot files
 # as other uids
